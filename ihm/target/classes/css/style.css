@@ -1,0 +1,55 @@
+/* Couleurs de la charte Akuunda Pay */
+.root {
+    -fx-background-color: white;
+}
+
+/* Titres */
+.label-title {
+    -fx-font-size: 22px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #3E1F47;
+}
+
+.label-subtitle {
+    -fx-text-fill: #8E8E93;
+    -fx-font-size: 14px;
+}
+
+/* Barre de recherche */
+.text-field {
+    -fx-background-color: #F2F2F7;
+    -fx-background-radius: 12;
+    -fx-padding: 12;
+}
+
+/* Bouton Continuer */
+.button-next {
+    -fx-background-color: #FF7A00;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-background-radius: 15;
+}
+
+.button-next:disabled {
+    -fx-background-color: #CCCCCC;
+}
+
+/* Cartes de pays */
+.country-card {
+    -fx-background-color: white;
+    -fx-border-color: #E5E5EA;
+    -fx-border-radius: 15;
+    -fx-background-radius: 15;
+    -fx-padding: 15;
+}
+
+.country-card:hover {
+    -fx-background-color: #FAF9FB;
+    -fx-border-color: #FF7A00;
+}
+
+.country-card-selected {
+    -fx-background-color: #FAF9FB;
+    -fx-border-color: #FF7A00;
+    -fx-border-width: 2;
+}
