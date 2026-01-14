@@ -27,8 +27,10 @@ public class App extends Application {
     private final String PRIMARY_PURPLE = "#391659";
     private final String ACCENT_ORANGE = "#F88809";
     
-    // URL pointant vers ton Backend Akuunda Wallet
-    private final String BACKEND_URL = "http://localhost:8089/api/internal/v1/auth/esim/catalog";
+    // Backend + token Keycloak passent via variables d'environnement
+    private final String BACKEND_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_URL",
+            "http://localhost:8089/api/internal/v1/esim/catalog");
+    private final String BACKEND_TOKEN = System.getenv("AKUUNDA_BACKEND_TOKEN");
     
     private VBox mainContainer;
     private VBox destinationList;
@@ -111,34 +113,70 @@ public class App extends Application {
         new Thread(() -> {
             try {
                 HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-                HttpRequest request = HttpRequest.newBuilder().uri(URI.create(BACKEND_URL)).GET().build();
+                // Appel du catalogue côté backend (token requis)
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_URL))
+                        .header("Accept", "application/json")
+                        .GET();
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpRequest request = requestBuilder.build();
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 
                 Platform.runLater(() -> {
-                    mainContainer.getChildren().remove(loader);
-                    if (response.statusCode() == 200 && !response.body().isEmpty()) {
-                        JSONArray products = new JSONArray(response.body());
-                        int foundCount = 0;
+                    try {
+                        mainContainer.getChildren().remove(loader);
+                        System.err.println("[IHM] Catalogue status=" + response.statusCode());
+                        if (response.body() != null) {
+                            System.err.println("[IHM] Catalogue body length=" + response.body().length());
+                        }
 
-                        for (int i = 0; i < products.length(); i++) {
-                            JSONObject p = products.getJSONObject(i);
-                            JSONObject def = p.optJSONObject("productDefinition");
-                            
-                            if (def != null) {
-                                JSONArray countryList = def.optJSONArray("countryList");
-                                // On filtre : le code ISO3 du pays sélectionné est-il dans la liste Transatel ?
-                                if (isCountryMatching(iso3, countryList)) {
-                                    plansListContainer.getChildren().add(createPlanCard(def));
-                                    foundCount++;
+                        if (response.statusCode() == 200 && response.body() != null && !response.body().isEmpty()) {
+                            // Réponse Transatel = objet { products: [...] }
+                            JSONObject catalog = new JSONObject(response.body());
+                            JSONArray products = catalog.optJSONArray("products");
+                            int foundCount = 0;
+
+                            if (products == null) {
+                                plansListContainer.getChildren().add(new Label("Catalogue invalide."));
+                                return;
+                            }
+
+                            for (int i = 0; i < products.length(); i++) {
+                                JSONObject p = products.getJSONObject(i);
+                                JSONObject def = p.optJSONObject("productDefinition");
+
+                                if (def != null) {
+                                    JSONArray countryList = def.optJSONArray("countryList");
+                                    // Filtre par pays (code ISO3 présent dans countryList)
+                                    if (isCountryMatching(iso3, countryList)) {
+                                        plansListContainer.getChildren().add(createPlanCard(def));
+                                        foundCount++;
+                                    }
                                 }
                             }
-                        }
 
-                        if (foundCount == 0) {
-                            plansListContainer.getChildren().add(new Label("Aucun forfait eSIM trouvé pour ce pays."));
+                            if (foundCount == 0) {
+                                plansListContainer.getChildren().add(new Label("Aucun forfait eSIM trouvé pour ce pays."));
+                            }
+                        } else {
+                            String body = response.body() == null ? "" : response.body().strip();
+                            if (body.length() > 200) {
+                                body = body.substring(0, 200) + "...";
+                            }
+                            if (response.statusCode() == 401) {
+                                plansListContainer.getChildren().add(new Label("401 - Token manquant ou invalide."));
+                            } else {
+                                plansListContainer.getChildren().add(new Label("Erreur catalogue: " + response.statusCode()));
+                            }
+                            if (!body.isEmpty()) {
+                                plansListContainer.getChildren().add(new Label(body));
+                            }
                         }
-                    } else {
-                        plansListContainer.getChildren().add(new Label("Erreur : Impossible de charger le catalogue."));
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                        plansListContainer.getChildren().add(new Label("Erreur UI: " + ex.getMessage()));
                     }
                 });
             } catch (Exception e) {
@@ -173,7 +211,7 @@ public class App extends Application {
         return card;
     }
 
-    // --- RÉCUPÉRATION DES PAYS VIA API ---
+    // --- RÉCUPÉRATION DES PAYS VIA API (restcountries) ---
     private void fetchCountriesFromAPI() {
         new Thread(() -> {
             try {
