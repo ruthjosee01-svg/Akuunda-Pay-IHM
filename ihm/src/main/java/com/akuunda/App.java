@@ -30,7 +30,10 @@ public class App extends Application {
     // Backend + token Keycloak passent via variables d'environnement
     private final String BACKEND_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_URL",
             "http://localhost:8089/api/internal/v1/esim/catalog");
+    private final String BACKEND_SUBSCRIBE_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_SUBSCRIBE_URL",
+            "http://localhost:8089/api/internal/v1/esim/subscribe");
     private final String BACKEND_TOKEN = System.getenv("AKUUNDA_BACKEND_TOKEN");
+    private final String BACKEND_USER_ID = System.getenv("AKUUNDA_USER_ID");
     
     private VBox mainContainer;
     private VBox destinationList;
@@ -151,7 +154,7 @@ public class App extends Application {
                                     JSONArray countryList = def.optJSONArray("countryList");
                                     // Filtre par pays (code ISO3 présent dans countryList)
                                     if (isCountryMatching(iso3, countryList)) {
-                                        plansListContainer.getChildren().add(createPlanCard(def));
+                                        plansListContainer.getChildren().add(createPlanCard(p));
                                         foundCount++;
                                     }
                                 }
@@ -193,21 +196,31 @@ public class App extends Application {
         return false;
     }
 
-    private VBox createPlanCard(JSONObject def) {
+    private VBox createPlanCard(JSONObject product) {
+        JSONObject def = product.optJSONObject("productDefinition");
+        if (def == null) {
+            return new VBox();
+        }
         VBox card = new VBox(10);
         card.setPadding(new Insets(15));
         card.setStyle("-fx-background-color: #FAF9FB; -fx-border-color: #E5E5EA; -fx-border-radius: 12;");
-        
+
         String name = def.optString("productId", "Forfait eSIM").replace("_", " ");
+        double amount = extractAmount(product);
+        String currency = extractCurrency(product);
         Label lbl = new Label(name);
         lbl.setWrapText(true);
         lbl.setStyle("-fx-font-weight: bold; -fx-text-fill: " + PRIMARY_PURPLE + "; -fx-font-size: 14;");
-        
+
+        Label priceLabel = new Label(formatPrice(amount, currency));
+        priceLabel.setStyle("-fx-text-fill: #5A5A5A; -fx-font-size: 12;");
+
         Button b = new Button("Sélectionner");
         b.setMaxWidth(Double.MAX_VALUE);
         b.setStyle("-fx-background-color: " + PRIMARY_PURPLE + "; -fx-text-fill: white; -fx-background-radius: 8; -fx-cursor: hand;");
-        
-        card.getChildren().addAll(lbl, b);
+        b.setOnAction(e -> confirmSubscribe(def.optString("productId", ""), amount));
+
+        card.getChildren().addAll(lbl, priceLabel, b);
         return card;
     }
 
@@ -267,6 +280,187 @@ public class App extends Application {
             nextBtn.setStyle("-fx-background-color: " + ACCENT_ORANGE + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 15;");
         });
         return card;
+    }
+
+    private void confirmSubscribe(String productId, double amount) {
+        if (productId == null || productId.isBlank()) {
+            showAlert("Erreur", "Produit invalide.");
+            return;
+        }
+        if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
+            showAlert("Erreur", "AKUUNDA_USER_ID est requis pour la souscription.");
+            return;
+        }
+
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle("Souscription eSIM");
+        alert.setHeaderText(null);
+        alert.setContentText("Confirmer la souscription de ce forfait ?");
+        alert.showAndWait().ifPresent(result -> {
+            if (result == ButtonType.OK) {
+                subscribeProduct(productId, amount);
+            }
+        });
+    }
+
+    private void subscribeProduct(String productId, double amount) {
+        Dialog<Void> loading = new Dialog<>();
+        loading.setTitle("Souscription");
+        loading.getDialogPane().setContent(new ProgressIndicator());
+        loading.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+        loading.setHeaderText("Souscription en cours...");
+        loading.show();
+
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                JSONObject payload = new JSONObject();
+                payload.put("productId", productId);
+                payload.put("userId", BACKEND_USER_ID);
+                payload.put("amount", amount);
+
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_SUBSCRIBE_URL))
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(() -> {
+                    loading.close();
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        try {
+                            JSONObject body = new JSONObject(response.body());
+                            String activationCode = body.optString("activationCode", "");
+                            String subscriptionId = body.optString("subscriptionId", "");
+                            String serial = body.optString("simSerial", "");
+                            String qrCodeValue = body.optString("qrCodeValue", "");
+                            String qrCodeDataUrl = body.optString("qrCodeDataUrl", "");
+
+                            String message = "Souscription OK\n" +
+                                    "subscriptionId: " + subscriptionId + "\n" +
+                                    "simSerial: " + serial + "\n" +
+                                    "activationCode: " + activationCode;
+                            showSuccessWithQr(message, qrCodeValue, qrCodeDataUrl);
+                        } catch (Exception ex) {
+                            showAlert("Succès", "Souscription OK (réponse non parsable).");
+                        }
+                    } else {
+                        String body = response.body() == null ? "" : response.body();
+                        showAlert("Erreur", "HTTP " + response.statusCode() + "\n" + body);
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    loading.close();
+                    showAlert("Erreur", e.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    private double extractAmount(JSONObject product) {
+        JSONObject prices = product.optJSONObject("prices");
+        if (prices == null) {
+            return 0.0;
+        }
+        JSONArray subscriptionFee = prices.optJSONArray("subscriptionFee");
+        if (subscriptionFee == null || subscriptionFee.length() == 0) {
+            return 0.0;
+        }
+        JSONArray tier = subscriptionFee.optJSONArray(0);
+        if (tier == null || tier.length() == 0) {
+            return 0.0;
+        }
+        JSONObject priceItem = tier.optJSONObject(0);
+        if (priceItem == null) {
+            return 0.0;
+        }
+        double amountCents = priceItem.optDouble("amount", 0.0);
+        return amountCents / 100.0;
+    }
+
+    private String extractCurrency(JSONObject product) {
+        JSONObject prices = product.optJSONObject("prices");
+        if (prices == null) {
+            return "";
+        }
+        JSONArray subscriptionFee = prices.optJSONArray("subscriptionFee");
+        if (subscriptionFee == null || subscriptionFee.length() == 0) {
+            return "";
+        }
+        JSONArray tier = subscriptionFee.optJSONArray(0);
+        if (tier == null || tier.length() == 0) {
+            return "";
+        }
+        JSONObject priceItem = tier.optJSONObject(0);
+        if (priceItem == null) {
+            return "";
+        }
+        return priceItem.optString("currency", "");
+    }
+
+    private String formatPrice(double amount, String currency) {
+        if (amount <= 0) {
+            return "Gratuit";
+        }
+        if (currency == null || currency.isBlank()) {
+            return String.format("%.2f", amount);
+        }
+        return String.format("%.2f %s", amount, currency);
+    }
+
+    private void showSuccessWithQr(String message, String qrCodeValue, String qrCodeDataUrl) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Succès");
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+
+        ImageView qrView = buildQrImageView(qrCodeDataUrl);
+        if (qrView != null) {
+            VBox content = new VBox(10);
+            content.setAlignment(Pos.CENTER_LEFT);
+            content.getChildren().addAll(new Label(message), qrView);
+            if (qrCodeValue != null && !qrCodeValue.isBlank()) {
+                content.getChildren().add(new Label(qrCodeValue));
+            }
+            alert.getDialogPane().setContent(content);
+        }
+        alert.showAndWait();
+    }
+
+    private ImageView buildQrImageView(String dataUrl) {
+        if (dataUrl == null || dataUrl.isBlank()) {
+            return null;
+        }
+        String prefix = "base64,";
+        int idx = dataUrl.indexOf(prefix);
+        if (idx < 0) {
+            return null;
+        }
+        String base64 = dataUrl.substring(idx + prefix.length());
+        try {
+            byte[] bytes = java.util.Base64.getDecoder().decode(base64);
+            Image img = new Image(new java.io.ByteArrayInputStream(bytes));
+            ImageView view = new ImageView(img);
+            view.setFitWidth(180);
+            view.setPreserveRatio(true);
+            return view;
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private void showAlert(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
     }
 
     public static void main(String[] args) { launch(); }
