@@ -8,6 +8,8 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 
@@ -19,6 +21,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -26,30 +29,42 @@ public class App extends Application {
 
     private final String PRIMARY_PURPLE = "#391659";
     private final String ACCENT_ORANGE = "#F88809";
-    
+
     // Backend + token Keycloak passent via variables d'environnement
+    private final String BACKEND_BASE_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_BASE_URL",
+            "http://localhost:8089/api/internal/v1");
     private final String BACKEND_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_URL",
-            "http://localhost:8089/api/internal/v1/esim/catalog");
+            BACKEND_BASE_URL + "/esim/catalog");
     private final String BACKEND_SUBSCRIBE_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_SUBSCRIBE_URL",
-            "http://localhost:8089/api/internal/v1/esim/subscribe");
+            BACKEND_BASE_URL + "/esim/subscribe");
+    private final String BACKEND_TRANSACTION_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_TRANSACTION_URL",
+            BACKEND_BASE_URL + "/esim/transactions");
+    private final String BACKEND_ESIM_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_ESIM_URL",
+            BACKEND_BASE_URL + "/esim");
     private final String BACKEND_TOKEN = System.getenv("AKUUNDA_BACKEND_TOKEN");
     private final String BACKEND_USER_ID = System.getenv("AKUUNDA_USER_ID");
     
     private VBox mainContainer;
     private VBox destinationList;
+    private TextField searchField;
+    private ToggleGroup scopeGroup;
     private List<JSONObject> allCountriesData = new ArrayList<>();
     private HBox selectedCountryCard = null;
     private String selectedCountryName = null;
     private String selectedCountryIso3 = null; // Code 3 lettres (ex: CIV, FRA)
+    private String selectedCountryIso2 = null;
+    private String userCountryIso2 = null;
+    private String userRegion = null;
     private Button nextBtn;
 
     @Override
     public void start(Stage stage) {
         mainContainer = new VBox(20);
         mainContainer.setPadding(new Insets(20, 25, 20, 25));
-        mainContainer.setStyle("-fx-background-color: #FFFFFF;");
+        mainContainer.getStyleClass().add("screen");
 
         Scene scene = new Scene(mainContainer, 420, 750);
+        scene.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
         buildMainSelectionScreen();
 
         stage.setTitle("Akuunda Pay - eSIM");
@@ -62,31 +77,39 @@ public class App extends Application {
     // --- ÉCRAN 1 : SÉLECTION DU PAYS ---
     private void buildMainSelectionScreen() {
         mainContainer.getChildren().clear();
-        
-        Label brand = new Label("Akuunda Pay");
-        brand.setStyle("-fx-font-weight: bold; -fx-font-size: 20; -fx-text-fill: " + PRIMARY_PURPLE + ";");
-        
-        Label title = new Label("Choisissez une destination");
-        title.setStyle("-fx-font-size: 22; -fx-font-weight: bold; -fx-text-fill: " + PRIMARY_PURPLE + ";");
+
+        HBox header = buildHeader();
+        Label title = new Label("Destinations");
+        title.getStyleClass().add("page-title");
+        Label subtitle = new Label("Choisissez un pays pour afficher les offres eSIM.");
+        subtitle.getStyleClass().add("page-subtitle");
+
+        searchField = new TextField();
+        searchField.setPromptText("Rechercher une destination");
+        searchField.getStyleClass().add("search-field");
+        searchField.textProperty().addListener((obs, oldVal, newVal) -> applyFiltersAndRender());
+
+        HBox scopeTabs = buildScopeTabs();
 
         destinationList = new VBox(15);
+        destinationList.getStyleClass().add("list-container");
         
         // ScrollPane pour la liste des pays
         ScrollPane scrollPane = new ScrollPane(destinationList);
         scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
+        scrollPane.getStyleClass().add("transparent-scroll");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
         nextBtn = new Button("Continuer");
         nextBtn.setMaxWidth(Double.MAX_VALUE);
         nextBtn.setMinHeight(55);
         nextBtn.setDisable(true);
-        nextBtn.setStyle("-fx-background-color: #CCCCCC; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 15;");
+        nextBtn.getStyleClass().add("primary-button");
         
         nextBtn.setOnAction(e -> showPlansPage(selectedCountryName, selectedCountryIso3));
 
-        mainContainer.getChildren().addAll(brand, title, scrollPane, nextBtn);
-        if (!allCountriesData.isEmpty()) updateListView(allCountriesData);
+        mainContainer.getChildren().addAll(header, title, subtitle, searchField, scopeTabs, scrollPane, nextBtn);
+        if (!allCountriesData.isEmpty()) applyFiltersAndRender();
     }
 
     // --- ÉCRAN 2 : LISTE DES OFFRES (Filtrée et Scrollable) ---
@@ -94,11 +117,13 @@ public class App extends Application {
         mainContainer.getChildren().clear();
         
         Button backBtn = new Button("← Retour");
-        backBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: " + PRIMARY_PURPLE + "; -fx-cursor: hand;");
+        backBtn.getStyleClass().add("link-button");
         backBtn.setOnAction(e -> buildMainSelectionScreen());
 
         Label title = new Label("Offres pour " + countryName);
-        title.setStyle("-fx-font-size: 20; -fx-font-weight: bold; -fx-text-fill: " + PRIMARY_PURPLE + ";");
+        title.getStyleClass().add("page-title");
+        Label subtitle = new Label("Forfaits disponibles pour " + countryName + ".");
+        subtitle.getStyleClass().add("page-subtitle");
 
         // Conteneur interne pour les cartes
         VBox plansListContainer = new VBox(15);
@@ -107,11 +132,12 @@ public class App extends Application {
         // ScrollPane CRUCIAL pour ne pas que la page se coupe
         ScrollPane scrollPane = new ScrollPane(plansListContainer);
         scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
+        scrollPane.getStyleClass().add("transparent-scroll");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
         ProgressIndicator loader = new ProgressIndicator();
-        mainContainer.getChildren().addAll(backBtn, title, loader, scrollPane);
+        loader.getStyleClass().add("loader");
+        mainContainer.getChildren().addAll(backBtn, title, subtitle, loader, scrollPane);
 
         new Thread(() -> {
             try {
@@ -188,6 +214,140 @@ public class App extends Application {
         }).start();
     }
 
+    private HBox buildHeader() {
+        HBox header = new HBox(12);
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.getStyleClass().add("header");
+
+        ImageView logo = new ImageView(new Image(getClass().getResourceAsStream("/images/logo.jpg")));
+        logo.setFitWidth(34);
+        logo.setPreserveRatio(true);
+        logo.getStyleClass().add("logo");
+
+        Label brand = new Label("Akuunda Pay");
+        brand.getStyleClass().add("brand-title");
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        Button menu = new Button("≡");
+        menu.getStyleClass().add("ghost-button");
+
+        header.getChildren().addAll(logo, brand, spacer, menu);
+        return header;
+    }
+
+    private HBox buildScopeTabs() {
+        scopeGroup = new ToggleGroup();
+        ToggleButton local = new ToggleButton("Local");
+        ToggleButton regional = new ToggleButton("Régional");
+        ToggleButton world = new ToggleButton("Monde");
+
+        local.setToggleGroup(scopeGroup);
+        regional.setToggleGroup(scopeGroup);
+        world.setToggleGroup(scopeGroup);
+
+        local.setUserData("LOCAL");
+        regional.setUserData("REGIONAL");
+        world.setUserData("WORLD");
+
+        world.setSelected(true);
+
+        scopeGroup.selectedToggleProperty().addListener((obs, oldVal, newVal) -> applyFiltersAndRender());
+
+        HBox tabs = new HBox(8, local, regional, world);
+        tabs.getStyleClass().add("segmented");
+        local.getStyleClass().add("segmented-button");
+        regional.getStyleClass().add("segmented-button");
+        world.getStyleClass().add("segmented-button");
+        return tabs;
+    }
+
+    private void applyFiltersAndRender() {
+        if (allCountriesData == null || allCountriesData.isEmpty()) {
+            return;
+        }
+        String search = searchField == null ? "" : searchField.getText().trim().toLowerCase();
+        String scope = "WORLD";
+        if (scopeGroup != null && scopeGroup.getSelectedToggle() != null) {
+            scope = scopeGroup.getSelectedToggle().getUserData().toString();
+        }
+
+        List<JSONObject> filtered = new ArrayList<>();
+        for (JSONObject country : allCountriesData) {
+            String name = country.getJSONObject("name").getString("common");
+            String iso2 = country.optString("cca2", "");
+            String region = country.optString("region", "");
+
+            if ("LOCAL".equals(scope)) {
+                if (userCountryIso2 != null && !userCountryIso2.isBlank()) {
+                    if (!userCountryIso2.equalsIgnoreCase(iso2)) {
+                        continue;
+                    }
+                }
+            } else if ("REGIONAL".equals(scope)) {
+                if (userRegion != null && !userRegion.isBlank()) {
+                    if (!userRegion.equalsIgnoreCase(region)) {
+                        continue;
+                    }
+                }
+            }
+
+            if (!search.isEmpty() && !name.toLowerCase().contains(search)) {
+                continue;
+            }
+            filtered.add(country);
+        }
+        updateListView(filtered);
+    }
+
+    private void detectUserRegion() {
+        userCountryIso2 = Locale.getDefault().getCountry();
+        if (userCountryIso2 == null || userCountryIso2.isBlank()) {
+            return;
+        }
+        for (JSONObject country : allCountriesData) {
+            String iso2 = country.optString("cca2", "");
+            if (userCountryIso2.equalsIgnoreCase(iso2)) {
+                userRegion = country.optString("region", null);
+                return;
+            }
+        }
+    }
+
+    private String humanizeProductId(String productId) {
+        String cleaned = productId.replace("_", " ");
+        cleaned = cleaned.replace("WW 9010 STACK ONEOFF ", "");
+        cleaned = cleaned.replace("WW 9010 STACK ", "");
+        return cleaned.trim();
+    }
+
+    private String extractPlanMeta(String productId) {
+        String data = "";
+        String duration = "";
+
+        java.util.regex.Matcher dataMatcher = java.util.regex.Pattern.compile("(\\d+)(GB|MB)").matcher(productId);
+        if (dataMatcher.find()) {
+            data = dataMatcher.group(1) + dataMatcher.group(2);
+        }
+
+        java.util.regex.Matcher durationMatcher = java.util.regex.Pattern.compile("(\\d+)D").matcher(productId);
+        if (durationMatcher.find()) {
+            duration = durationMatcher.group(1) + " jours";
+        }
+
+        if (!data.isEmpty() && !duration.isEmpty()) {
+            return data + " \u2022 " + duration;
+        }
+        if (!data.isEmpty()) {
+            return data;
+        }
+        if (!duration.isEmpty()) {
+            return duration;
+        }
+        return "Forfait eSIM";
+    }
+
     private boolean isCountryMatching(String target, JSONArray list) {
         if (list == null) return false;
         for (int i = 0; i < list.length(); i++) {
@@ -203,24 +363,29 @@ public class App extends Application {
         }
         VBox card = new VBox(10);
         card.setPadding(new Insets(15));
-        card.setStyle("-fx-background-color: #FAF9FB; -fx-border-color: #E5E5EA; -fx-border-radius: 12;");
+        card.getStyleClass().add("plan-card");
 
-        String name = def.optString("productId", "Forfait eSIM").replace("_", " ");
+        String productId = def.optString("productId", "Forfait eSIM");
+        String name = humanizeProductId(productId);
         double amount = extractAmount(product);
         String currency = extractCurrency(product);
         Label lbl = new Label(name);
         lbl.setWrapText(true);
-        lbl.setStyle("-fx-font-weight: bold; -fx-text-fill: " + PRIMARY_PURPLE + "; -fx-font-size: 14;");
+        lbl.getStyleClass().add("plan-title");
 
         Label priceLabel = new Label(formatPrice(amount, currency));
-        priceLabel.setStyle("-fx-text-fill: #5A5A5A; -fx-font-size: 12;");
+        priceLabel.getStyleClass().add("plan-price");
+
+        String meta = extractPlanMeta(productId);
+        Label metaLabel = new Label(meta);
+        metaLabel.getStyleClass().add("plan-meta");
 
         Button b = new Button("Sélectionner");
         b.setMaxWidth(Double.MAX_VALUE);
-        b.setStyle("-fx-background-color: " + PRIMARY_PURPLE + "; -fx-text-fill: white; -fx-background-radius: 8; -fx-cursor: hand;");
-        b.setOnAction(e -> confirmSubscribe(def.optString("productId", ""), amount));
+        b.getStyleClass().add("primary-button");
+        b.setOnAction(e -> confirmSubscribe(productId, amount));
 
-        card.getChildren().addAll(lbl, priceLabel, b);
+        card.getChildren().addAll(lbl, metaLabel, priceLabel, b);
         return card;
     }
 
@@ -229,9 +394,9 @@ public class App extends Application {
         new Thread(() -> {
             try {
                 HttpClient client = HttpClient.newHttpClient();
-                // On récupère cca3 pour avoir les codes 3 lettres (ex: CIV, FRA)
+                // On récupère cca2/cca3 + region pour filtrer
                 HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create("https://restcountries.com/v3.1/all?fields=name,flags,cca3"))
+                        .uri(URI.create("https://restcountries.com/v3.1/all?fields=name,flags,cca3,cca2,region"))
                         .build();
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 JSONArray array = new JSONArray(response.body());
@@ -239,7 +404,8 @@ public class App extends Application {
                 for (int i = 0; i < array.length(); i++) list.add(array.getJSONObject(i));
                 list.sort(Comparator.comparing(c -> c.getJSONObject("name").getString("common").toLowerCase()));
                 allCountriesData = list;
-                Platform.runLater(() -> updateListView(allCountriesData));
+                detectUserRegion();
+                Platform.runLater(this::applyFiltersAndRender);
             } catch (Exception e) {}
         }).start();
     }
@@ -250,34 +416,39 @@ public class App extends Application {
             String name = country.getJSONObject("name").getString("common");
             String flag = country.getJSONObject("flags").getString("png");
             String iso3 = country.getString("cca3");
-            destinationList.getChildren().add(createCountryCard(name, flag, iso3));
+            String iso2 = country.optString("cca2", "");
+            String region = country.optString("region", "");
+            destinationList.getChildren().add(createCountryCard(name, flag, iso3, iso2, region));
         }
     }
 
-    private HBox createCountryCard(String name, String flagUrl, String iso3) {
+    private HBox createCountryCard(String name, String flagUrl, String iso3, String iso2, String region) {
         HBox card = new HBox(15);
         card.setAlignment(Pos.CENTER_LEFT);
         card.setPadding(new Insets(10));
-        card.setStyle("-fx-background-color: white; -fx-border-color: #E5E5EA; -fx-border-radius: 10; -fx-cursor: hand;");
+        card.getStyleClass().add("country-card");
         
         try {
             ImageView iv = new ImageView(new Image(flagUrl, true));
-            iv.setFitWidth(30); iv.setPreserveRatio(true);
+            iv.setFitWidth(34);
+            iv.setPreserveRatio(true);
             card.getChildren().add(iv);
         } catch (Exception e) {}
 
         Label n = new Label(name);
-        n.setStyle("-fx-font-weight: bold; -fx-text-fill: " + PRIMARY_PURPLE + ";");
+        n.getStyleClass().add("country-name");
         card.getChildren().add(n);
 
         card.setOnMouseClicked(e -> {
-            if (selectedCountryCard != null) selectedCountryCard.setStyle("-fx-background-color: white; -fx-border-color: #E5E5EA; -fx-border-radius: 10;");
+            if (selectedCountryCard != null) {
+                selectedCountryCard.getStyleClass().remove("country-card-selected");
+            }
             selectedCountryCard = card;
             this.selectedCountryName = name;
             this.selectedCountryIso3 = iso3;
-            card.setStyle("-fx-background-color: #FAF9FB; -fx-border-color: " + ACCENT_ORANGE + "; -fx-border-width: 2; -fx-border-radius: 10;");
+            this.selectedCountryIso2 = iso2;
+            card.getStyleClass().add("country-card-selected");
             nextBtn.setDisable(false);
-            nextBtn.setStyle("-fx-background-color: " + ACCENT_ORANGE + "; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 15;");
         });
         return card;
     }
@@ -294,8 +465,8 @@ public class App extends Application {
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle("Souscription eSIM");
-        alert.setHeaderText(null);
-        alert.setContentText("Confirmer la souscription de ce forfait ?");
+        alert.setHeaderText("Confirmer la souscription ?");
+        alert.setContentText("Vous allez activer un forfait eSIM pour ce pays.");
         alert.showAndWait().ifPresent(result -> {
             if (result == ButtonType.OK) {
                 subscribeProduct(productId, amount);
@@ -337,6 +508,9 @@ public class App extends Application {
                             JSONObject body = new JSONObject(response.body());
                             String activationCode = body.optString("activationCode", "");
                             String subscriptionId = body.optString("subscriptionId", "");
+                            String transactionId = body.optString("transactionId", "");
+                            String transactionStatus = body.optString("transactionStatus", "");
+                            boolean activationRequired = body.optBoolean("activationRequired", false);
                             String serial = body.optString("simSerial", "");
                             String qrCodeValue = body.optString("qrCodeValue", "");
                             String qrCodeDataUrl = body.optString("qrCodeDataUrl", "");
@@ -345,7 +519,20 @@ public class App extends Application {
                                     "subscriptionId: " + subscriptionId + "\n" +
                                     "simSerial: " + serial + "\n" +
                                     "activationCode: " + activationCode;
-                            showSuccessWithQr(message, qrCodeValue, qrCodeDataUrl);
+
+                            if ((activationCode != null && !activationCode.isBlank())
+                                    || (qrCodeValue != null && !qrCodeValue.isBlank())
+                                    || (qrCodeDataUrl != null && !qrCodeDataUrl.isBlank())) {
+                                showSuccessWithQr(message, qrCodeValue, qrCodeDataUrl);
+                            } else if (activationRequired && transactionId != null && !transactionId.isBlank()) {
+                                showActivationPendingAndPoll(transactionId, serial);
+                            } else {
+                                String fallback = message;
+                                if (transactionStatus != null && !transactionStatus.isBlank()) {
+                                    fallback += "\ntransactionStatus: " + transactionStatus;
+                                }
+                                showAlert("Succès", fallback);
+                            }
                         } catch (Exception ex) {
                             showAlert("Succès", "Souscription OK (réponse non parsable).");
                         }
@@ -361,6 +548,115 @@ public class App extends Application {
                 });
             }
         }).start();
+    }
+
+    private void showActivationPendingAndPoll(String transactionId, String simSerial) {
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("Activation eSIM");
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+        Label statusLabel = new Label("Activation en cours...");
+        VBox content = new VBox(10, new ProgressIndicator(), statusLabel);
+        content.setAlignment(Pos.CENTER_LEFT);
+        dialog.getDialogPane().setContent(content);
+
+        final boolean[] canceled = {false};
+        dialog.setOnCloseRequest(e -> canceled[0] = true);
+        dialog.show();
+
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                int attempts = 20;
+                int delayMs = 3000;
+                for (int i = 1; i <= attempts; i++) {
+                    if (canceled[0]) {
+                        return;
+                    }
+
+                    JSONObject status = fetchTransactionStatus(client, transactionId);
+                    String asyncStatus = "";
+                    if (status != null) {
+                        asyncStatus = status.optString("asyncStatus",
+                                status.optString("transactionStatus", ""));
+                    }
+                    String normalized = asyncStatus == null ? "" : asyncStatus.trim().toUpperCase();
+                    if ("DONE".equals(normalized) || "SUCCESS".equals(normalized)) {
+                        Platform.runLater(() -> statusLabel.setText("Activation terminée. Récupération du QR..."));
+                        JSONObject esim = fetchEsimDetails(client, simSerial);
+                        Platform.runLater(() -> {
+                            dialog.close();
+                            if (esim != null) {
+                                String activationCode = esim.optString("activationCode", "");
+                                String qrValue = "";
+                                String qrDataUrl = "";
+                                JSONObject qrCode = esim.optJSONObject("qrCode");
+                                if (qrCode != null) {
+                                    qrValue = qrCode.optString("value", "");
+                                    qrDataUrl = qrCode.optString("dataUrl", "");
+                                }
+                                String message = "Activation OK\n" +
+                                        "simSerial: " + simSerial + "\n" +
+                                        "activationCode: " + activationCode;
+                                showSuccessWithQr(message, qrValue, qrDataUrl);
+                            } else {
+                                showAlert("Activation", "Activation terminée, mais QR non récupéré.");
+                            }
+                        });
+                        return;
+                    }
+                    if ("ERROR".equals(normalized)) {
+                        Platform.runLater(() -> {
+                            dialog.close();
+                            showAlert("Erreur", "Activation eSIM en échec.");
+                        });
+                        return;
+                    }
+
+                    int current = i;
+                    Platform.runLater(() -> statusLabel.setText("Activation en cours... (" + current + "/" + attempts + ")"));
+                    Thread.sleep(delayMs);
+                }
+                Platform.runLater(() -> {
+                    dialog.close();
+                    showAlert("Activation", "Activation toujours en cours. Réessayez plus tard.");
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    dialog.close();
+                    showAlert("Erreur", e.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    private JSONObject fetchTransactionStatus(HttpClient client, String transactionId) throws Exception {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create(BACKEND_TRANSACTION_URL + "/" + transactionId))
+                .header("Accept", "application/json")
+                .GET();
+        if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+            requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+        }
+        HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+            return new JSONObject(response.body());
+        }
+        return null;
+    }
+
+    private JSONObject fetchEsimDetails(HttpClient client, String simSerial) throws Exception {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create(BACKEND_ESIM_URL + "/" + simSerial))
+                .header("Accept", "application/json")
+                .GET();
+        if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+            requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+        }
+        HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+            return new JSONObject(response.body());
+        }
+        return null;
     }
 
     private double extractAmount(JSONObject product) {
@@ -415,22 +711,37 @@ public class App extends Application {
     }
 
     private void showSuccessWithQr(String message, String qrCodeValue, String qrCodeDataUrl) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Succès");
-        alert.setHeaderText(null);
-        alert.setContentText(message);
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("Succès");
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.OK);
+
+        Label title = new Label("Votre eSIM est prête");
+        title.getStyleClass().add("dialog-title");
+        Label subtitle = new Label("Scannez le QR code pour installer l'eSIM.");
+        subtitle.getStyleClass().add("dialog-subtitle");
 
         ImageView qrView = buildQrImageView(qrCodeDataUrl);
+        VBox content = new VBox(12, title, subtitle);
+        content.getStyleClass().add("dialog-content");
+
         if (qrView != null) {
-            VBox content = new VBox(10);
-            content.setAlignment(Pos.CENTER_LEFT);
-            content.getChildren().addAll(new Label(message), qrView);
-            if (qrCodeValue != null && !qrCodeValue.isBlank()) {
-                content.getChildren().add(new Label(qrCodeValue));
-            }
-            alert.getDialogPane().setContent(content);
+            content.getChildren().add(qrView);
         }
-        alert.showAndWait();
+        if (qrCodeValue != null && !qrCodeValue.isBlank()) {
+            Label lpa = new Label("LPA: " + qrCodeValue);
+            lpa.getStyleClass().add("dialog-lpa");
+            Button copy = new Button("Copier le code LPA");
+            copy.getStyleClass().add("secondary-button");
+            copy.setOnAction(e -> copyToClipboard(qrCodeValue));
+            content.getChildren().addAll(lpa, copy);
+        }
+
+        Label nextSteps = new Label("Ensuite, activez les donnees mobiles sur votre iPhone/Android.");
+        nextSteps.getStyleClass().add("dialog-hint");
+        content.getChildren().add(nextSteps);
+
+        dialog.getDialogPane().setContent(content);
+        dialog.showAndWait();
     }
 
     private ImageView buildQrImageView(String dataUrl) {
@@ -453,6 +764,13 @@ public class App extends Application {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private void copyToClipboard(String value) {
+        ClipboardContent content = new ClipboardContent();
+        content.putString(value);
+        Clipboard.getSystemClipboard().setContent(content);
+        showAlert("Copié", "Le code LPA a été copié.");
     }
 
     private void showAlert(String title, String message) {

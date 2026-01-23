@@ -1,55 +1,160 @@
-/* Couleurs de la charte Akuunda Pay */
-.root {
-    -fx-background-color: white;
+/* Couleurs Akuunda Pay */
+.screen {
+    -fx-background-color: #F7F3FB;
+    -fx-font-family: "Nunito", "System";
 }
 
-/* Titres */
-.label-title {
-    -fx-font-size: 22px;
-    -fx-font-weight: bold;
-    -fx-text-fill: #3E1F47;
+.header {
+    -fx-padding: 4 0 4 0;
+    -fx-background-color: transparent;
 }
 
-.label-subtitle {
-    -fx-text-fill: #8E8E93;
-    -fx-font-size: 14px;
+.brand-title {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 18px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #391659;
 }
 
-/* Barre de recherche */
-.text-field {
-    -fx-background-color: #F2F2F7;
-    -fx-background-radius: 12;
+.ghost-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #391659;
+    -fx-font-size: 18px;
+}
+
+.page-title {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 24px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #391659;
+}
+
+.page-subtitle {
+    -fx-font-size: 13px;
+    -fx-text-fill: #6F6A77;
+}
+
+.search-field {
+    -fx-background-color: #FFFFFF;
+    -fx-background-radius: 16;
+    -fx-border-radius: 16;
+    -fx-border-color: #E8E2F0;
     -fx-padding: 12;
 }
 
-/* Bouton Continuer */
-.button-next {
-    -fx-background-color: #FF7A00;
+.transparent-scroll {
+    -fx-background-color: transparent;
+    -fx-background: transparent;
+    -fx-border-color: transparent;
+}
+
+.segmented .toggle-button {
+    -fx-background-color: #EFE6F9;
+    -fx-text-fill: #391659;
+    -fx-background-radius: 14;
+    -fx-border-radius: 14;
+    -fx-padding: 6 16;
+}
+
+.segmented .toggle-button:selected {
+    -fx-background-color: #F88809;
+    -fx-text-fill: #FFFFFF;
+}
+
+.primary-button {
+    -fx-background-color: #391659;
     -fx-text-fill: white;
-    -fx-font-weight: bold;
-    -fx-background-radius: 15;
+    -fx-font-weight: 700;
+    -fx-background-radius: 14;
+    -fx-padding: 10 16;
 }
 
-.button-next:disabled {
-    -fx-background-color: #CCCCCC;
+.primary-button:disabled {
+    -fx-background-color: #C7C2CF;
 }
 
-/* Cartes de pays */
+.secondary-button {
+    -fx-background-color: #EFE6F9;
+    -fx-text-fill: #391659;
+    -fx-font-weight: 700;
+    -fx-background-radius: 14;
+    -fx-padding: 8 14;
+}
+
+.link-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #391659;
+    -fx-font-weight: 600;
+}
+
 .country-card {
-    -fx-background-color: white;
-    -fx-border-color: #E5E5EA;
-    -fx-border-radius: 15;
-    -fx-background-radius: 15;
-    -fx-padding: 15;
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #E8E2F0;
+    -fx-border-radius: 16;
+    -fx-background-radius: 16;
+    -fx-padding: 12;
 }
 
 .country-card:hover {
-    -fx-background-color: #FAF9FB;
-    -fx-border-color: #FF7A00;
+    -fx-border-color: #F88809;
 }
 
 .country-card-selected {
-    -fx-background-color: #FAF9FB;
-    -fx-border-color: #FF7A00;
+    -fx-border-color: #F88809;
     -fx-border-width: 2;
+}
+
+.country-name {
+    -fx-font-weight: 700;
+    -fx-text-fill: #2C193D;
+}
+
+.plan-card {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #E8E2F0;
+    -fx-border-radius: 16;
+    -fx-background-radius: 16;
+}
+
+.plan-title {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #391659;
+}
+
+.plan-meta {
+    -fx-text-fill: #8C819B;
+    -fx-font-size: 12px;
+}
+
+.plan-price {
+    -fx-text-fill: #F88809;
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+}
+
+.dialog-content {
+    -fx-padding: 8;
+}
+
+.dialog-title {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 16px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #391659;
+}
+
+.dialog-subtitle {
+    -fx-text-fill: #6F6A77;
+}
+
+.dialog-lpa {
+    -fx-text-fill: #391659;
+    -fx-font-size: 12px;
+}
+
+.dialog-hint {
+    -fx-text-fill: #8C819B;
+    -fx-font-size: 11px;
 }
