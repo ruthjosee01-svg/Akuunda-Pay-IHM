@@ -53,6 +53,7 @@ public class App extends Application {
             BACKEND_BASE_URL + "/esim/transactions");
     private final String BACKEND_ESIM_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_ESIM_URL",
             BACKEND_BASE_URL + "/esim");
+    private final String REALM_NAME = System.getenv().getOrDefault("AKUUNDA_REALM_NAME", "akuunda-realm");
     private final String BACKEND_TOKEN = System.getenv("AKUUNDA_BACKEND_TOKEN");
     private final String BACKEND_USER_ID = System.getenv("AKUUNDA_USER_ID");
     
@@ -69,6 +70,8 @@ public class App extends Application {
     private String userCountryIso2 = null;
     private String userRegion = null;
     private Button nextBtn;
+    private Label walletBalanceLabel;
+    private String cachedDisplayName = null;
     private String currentLang = "fr";
     private boolean isPlansPage = false;
     private String lastPlansCountryName = null;
@@ -103,12 +106,19 @@ public class App extends Application {
     // --- ÉCRAN 1 : SÉLECTION DU PAYS ---
     private void buildMainSelectionScreen() {
         mainContainer.getChildren().clear();
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("app.title"));
+        }
+
 
         HBox header = buildHeader();
         Label title = new Label(t("destinations.title"));
         title.getStyleClass().add("page-title");
         Label subtitle = new Label(t("destinations.subtitle"));
         subtitle.getStyleClass().add("page-subtitle");
+
+        Label greeting = new Label(buildGreetingText());
+        greeting.getStyleClass().add("greeting-label");
 
         searchField = new TextField();
         searchField.setPromptText(t("search.prompt"));
@@ -134,12 +144,13 @@ public class App extends Application {
         
         nextBtn.setOnAction(e -> showPlansPage(selectedCountryName, selectedCountryIso3));
 
-        mainContainer.getChildren().addAll(header, title, subtitle, searchField, scopeTabs, scrollPane, nextBtn);
+        mainContainer.getChildren().addAll(header, title, subtitle, greeting, searchField, scopeTabs, scrollPane, nextBtn);
         isPlansPage = false;
         if (nextBtn != null) {
             nextBtn.setDisable(selectedCountryIso3 == null || selectedCountryIso3.isBlank());
         }
         if (!allCountriesData.isEmpty()) applyFiltersAndRender();
+        fetchWalletBalance();
     }
 
     // --- ÉCRAN 2 : LISTE DES OFFRES (Filtrée et Scrollable) ---
@@ -263,6 +274,9 @@ public class App extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
+        walletBalanceLabel = new Label(t("wallet.placeholder"));
+        walletBalanceLabel.getStyleClass().add("wallet-balance");
+
         ChoiceBox<String> langSelect = new ChoiceBox<>();
         langSelect.getItems().addAll("Francais", "English", "Deutsch", "Espanol", "中文");
         langSelect.setValue(langLabels.getOrDefault(currentLang, "Francais"));
@@ -289,8 +303,95 @@ public class App extends Application {
         Button menu = new Button(t("nav.menu"));
         menu.getStyleClass().add("ghost-button");
 
-        header.getChildren().addAll(logo, brand, spacer, langSelect, menu);
+        header.getChildren().addAll(logo, brand, spacer, walletBalanceLabel, langSelect, menu);
         return header;
+    }
+
+    private String buildGreetingText() {
+        String name = getDisplayNameFromToken();
+        if (name == null || name.isBlank()) {
+            return t("greeting.default");
+        }
+        return t("greeting.default") + ", " + name;
+    }
+
+    private String getDisplayNameFromToken() {
+        if (cachedDisplayName != null) {
+            return cachedDisplayName;
+        }
+        if (BACKEND_TOKEN == null || BACKEND_TOKEN.isBlank()) {
+            return null;
+        }
+        try {
+            String[] parts = BACKEND_TOKEN.split("\\.");
+            if (parts.length < 2) {
+                return null;
+            }
+            String payload = parts[1];
+            int pad = (4 - payload.length() % 4) % 4;
+            payload = payload + "=".repeat(pad);
+            byte[] decoded = java.util.Base64.getUrlDecoder().decode(payload);
+            String json = new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
+            JSONObject obj = new JSONObject(json);
+            String name = obj.optString("name", "");
+            if (name == null || name.isBlank()) {
+                name = obj.optString("preferred_username", "");
+            }
+            if (name == null || name.isBlank()) {
+                name = obj.optString("given_name", "");
+            }
+            if (name != null && !name.isBlank()) {
+                cachedDisplayName = name;
+            }
+            return cachedDisplayName;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+
+    private void fetchWalletBalance() {
+        if (walletBalanceLabel == null) {
+            return;
+        }
+        if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
+            walletBalanceLabel.setText(t("wallet.placeholder"));
+            return;
+        }
+        String url = BACKEND_BASE_URL + "/users/" + REALM_NAME + "/wallet-balance/user-id/" + BACKEND_USER_ID;
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Accept", "application/json")
+                        .GET();
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+                    JSONObject body = new JSONObject(response.body());
+                    JSONObject data = body.optJSONObject("data");
+                    if (data != null) {
+                        double userBalance = data.optDouble("userBalance", -1);
+                        double convertedAmount = data.optDouble("convertedAmount", -1);
+                        String text;
+                        if (convertedAmount >= 0 && userBalance >= 0) {
+                            text = String.format("%s: %.2f (≈ %.2f USDC)", t("wallet.prefix"), convertedAmount, userBalance);
+                        } else {
+                            text = t("wallet.unavailable");
+                        }
+                        final String finalText = text;
+                        Platform.runLater(() -> walletBalanceLabel.setText(finalText));
+                        return;
+                    }
+                }
+                Platform.runLater(() -> walletBalanceLabel.setText(t("wallet.unavailable")));
+            } catch (Exception e) {
+                Platform.runLater(() -> walletBalanceLabel.setText(t("wallet.unavailable")));
+            }
+        }).start();
     }
 
     private HBox buildScopeTabs() {
@@ -534,42 +635,36 @@ public class App extends Application {
     }
 
     private void openContinentWindow(String region, List<JSONObject> countries) {
-        Stage stage = new Stage();
         String localizedRegion = localizeRegion(region);
-        stage.setTitle(t("continent.title") + " " + localizedRegion);
+        mainContainer.getChildren().clear();
+        isPlansPage = false;
 
-        VBox root = new VBox(15);
         Button backBtn = new Button("<- " + t("nav.back"));
         backBtn.getStyleClass().addAll("link-button", "back-button");
-        backBtn.setOnAction(e -> stage.close());
-
-        root.setPadding(new Insets(20, 25, 20, 25));
-        root.getStyleClass().add("screen");
+        backBtn.setOnAction(e -> buildMainSelectionScreen());
 
         Label title = new Label(t("continent.title") + " " + localizedRegion);
         title.getStyleClass().add("page-title");
-        Label subtitle = new Label(t("continent.subtitle"));
+        Label subtitle = new Label(t("continent.subtitle") + " " + localizedRegion + ".");
         subtitle.getStyleClass().add("page-subtitle");
 
-        VBox list = new VBox(12);
-        list.getStyleClass().add("list-container");
-        countries.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
-        for (JSONObject country : countries) {
-            list.getChildren().add(createCountryCard(country, false, stage));
+        VBox listContainer = new VBox(12);
+        listContainer.setPadding(new Insets(10, 5, 10, 5));
+        for (JSONObject c : countries) {
+            listContainer.getChildren().add(createCountryCard(c, false, null));
         }
 
-        ScrollPane scrollPane = new ScrollPane(list);
+        ScrollPane scrollPane = new ScrollPane(listContainer);
         scrollPane.setFitToWidth(true);
         scrollPane.getStyleClass().add("transparent-scroll");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
-        root.getChildren().addAll(backBtn, title, subtitle, scrollPane);
-
-        Scene scene = new Scene(root, 420, 750);
-        scene.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
-        stage.setScene(scene);
-        stage.show();
+        mainContainer.getChildren().addAll(backBtn, title, subtitle, scrollPane);
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("continent.title") + " " + localizedRegion);
+        }
     }
+
     private HBox createCountryCard(JSONObject country) {
         return createCountryCard(country, true, null);
     }
@@ -1161,6 +1256,8 @@ public class App extends Application {
         fr.put("continent.oceania", "Oceanie");
         fr.put("continent.antarctic", "Antarctique");
         fr.put("continent.other", "Autres");
+        fr.put("continent.title", "Continent");
+        fr.put("continent.subtitle", "Choisissez un pays en");
         fr.put("cta.viewPlans", "Voir les forfaits");
         fr.put("nav.back", "Retour");
         fr.put("nav.menu", "MENU");
@@ -1202,6 +1299,10 @@ public class App extends Application {
         fr.put("errors.qr.download", "Echec du telechargement du QR.");
         fr.put("success.next", "Ensuite, activez les donnees mobiles sur votre iPhone/Android.");
         fr.put("clipboard.copied", "Le code LPA a été copié.");
+        fr.put("greeting.default", "Bonjour");
+        fr.put("wallet.prefix", "Solde");
+        fr.put("wallet.placeholder", "Solde: --");
+        fr.put("wallet.unavailable", "Solde indisponible");
 
         Map<String, String> en = new HashMap<>();
         en.put("app.title", "Akuunda Pay - eSIM");
@@ -1218,6 +1319,8 @@ public class App extends Application {
         en.put("continent.oceania", "Oceania");
         en.put("continent.antarctic", "Antarctic");
         en.put("continent.other", "Other");
+        en.put("continent.title", "Continent");
+        en.put("continent.subtitle", "Choose a country in");
         en.put("cta.viewPlans", "View plans");
         en.put("nav.back", "Back");
         en.put("nav.menu", "MENU");
@@ -1259,6 +1362,10 @@ public class App extends Application {
         en.put("errors.qr.download", "Failed to download QR.");
         en.put("success.next", "Then enable cellular data on your iPhone/Android.");
         en.put("clipboard.copied", "The LPA code has been copied.");
+        en.put("greeting.default", "Hello");
+        en.put("wallet.prefix", "Balance");
+        en.put("wallet.placeholder", "Balance: --");
+        en.put("wallet.unavailable", "Balance unavailable");
 
         Map<String, String> de = new HashMap<>();
         de.put("app.title", "Akuunda Pay - eSIM");
@@ -1275,6 +1382,8 @@ public class App extends Application {
         de.put("continent.oceania", "Ozeanien");
         de.put("continent.antarctic", "Antarktis");
         de.put("continent.other", "Andere");
+        de.put("continent.title", "Kontinent");
+        de.put("continent.subtitle", "Wähle ein Land in");
         de.put("cta.viewPlans", "Tarife anzeigen");
         de.put("nav.back", "Zurück");
         de.put("nav.menu", "MENU");
@@ -1316,6 +1425,10 @@ public class App extends Application {
         de.put("errors.qr.download", "QR-Download fehlgeschlagen.");
         de.put("success.next", "Aktiviere anschließend mobile Daten auf deinem iPhone/Android.");
         de.put("clipboard.copied", "Der LPA-Code wurde kopiert.");
+        de.put("greeting.default", "Hallo");
+        de.put("wallet.prefix", "Guthaben");
+        de.put("wallet.placeholder", "Guthaben: --");
+        de.put("wallet.unavailable", "Guthaben nicht verfugbar");
 
         Map<String, String> es = new HashMap<>();
         es.put("app.title", "Akuunda Pay - eSIM");
@@ -1332,6 +1445,8 @@ public class App extends Application {
         es.put("continent.oceania", "Oceania");
         es.put("continent.antarctic", "Antartida");
         es.put("continent.other", "Otros");
+        es.put("continent.title", "Continente");
+        es.put("continent.subtitle", "Elige un país en");
         es.put("cta.viewPlans", "Ver planes");
         es.put("nav.back", "Volver");
         es.put("nav.menu", "MENU");
@@ -1373,6 +1488,10 @@ public class App extends Application {
         es.put("errors.qr.download", "Fallo al descargar el QR.");
         es.put("success.next", "Luego activa los datos móviles en tu iPhone/Android.");
         es.put("clipboard.copied", "El código LPA se ha copiado.");
+        es.put("greeting.default", "Hola");
+        es.put("wallet.prefix", "Saldo");
+        es.put("wallet.placeholder", "Saldo: --");
+        es.put("wallet.unavailable", "Saldo no disponible");
 
         Map<String, String> zh = new HashMap<>();
         zh.put("continent.africa", "非洲");
@@ -1382,6 +1501,8 @@ public class App extends Application {
         zh.put("continent.oceania", "大洋洲");
         zh.put("continent.antarctic", "南极洲");
         zh.put("continent.other", "其他");
+        zh.put("continent.title", "大洲");
+                zh.put("continent.subtitle", "请选择位于");
         zh.put("app.title", "Akuunda Pay - eSIM");
         zh.put("destinations.title", "目的地");
         zh.put("destinations.subtitle", "选择一个国家查看 eSIM 套餐。");
@@ -1430,6 +1551,10 @@ public class App extends Application {
         zh.put("errors.qr.download", "二维码下载失败。");
         zh.put("success.next", "然后在 iPhone/Android 上开启移动数据。");
         zh.put("clipboard.copied", "LPA 代码已复制。");
+        zh.put("greeting.default", "你好");
+        zh.put("wallet.prefix", "余额");
+        zh.put("wallet.placeholder", "余额: --");
+        zh.put("wallet.unavailable", "余额不可用");
 
         dict.put("fr", fr);
         dict.put("en", en);

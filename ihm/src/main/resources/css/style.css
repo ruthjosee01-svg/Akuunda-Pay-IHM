@@ -16,6 +16,19 @@
     -fx-text-fill: #FFFFFF;
 }
 
+.wallet-balance {
+    -fx-text-fill: #FFFFFF;
+    -fx-font-size: 12px;
+    -fx-font-weight: 700;
+    -fx-background-color: rgba(248, 136, 9, 0.35);
+    -fx-border-color: rgba(255, 255, 255, 0.25);
+    -fx-border-width: 1;
+    -fx-background-radius: 14;
+    -fx-border-radius: 14;
+    -fx-padding: 4 10 4 10;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.18), 6, 0.1, 0, 1);
+}
+
 .ghost-button {
     -fx-background-color: transparent;
     -fx-text-fill: #FFFFFF;
@@ -32,6 +45,12 @@
 .page-subtitle {
     -fx-font-size: 13px;
     -fx-text-fill: #FCE8D6;
+}
+
+.greeting-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: #E6D5F0;
+    -fx-font-weight: 600;
 }
 
 .hero-card {
