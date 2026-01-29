@@ -94,7 +94,7 @@ public class App extends Application {
 
         Scene scene = new Scene(mainContainer, 420, 750);
         scene.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
-        buildMainSelectionScreen();
+        buildEsimIntroScreen();
 
         stage.setTitle(t("app.title"));
         stage.setScene(scene);
@@ -103,19 +103,77 @@ public class App extends Application {
         fetchCountriesFromAPI();
     }
 
-    // --- ÉCRAN 1 : SÉLECTION DU PAYS ---
+    // --- ÉCRAN 0 : ACCUEIL (style app principale) ---
+
+
+    // --- ÉCRAN 0.5 : INTRO eSIM ---
+    private void buildEsimIntroScreen() {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = false;
+
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("esim.intro.header"));
+        }
+
+        HBox topBar = new HBox();
+        topBar.getStyleClass().add("top-bar");
+        topBar.setAlignment(Pos.CENTER_LEFT);
+
+        Button backBtn = new Button("←");
+        backBtn.getStyleClass().add("top-bar-button");
+        backBtn.setDisable(true);
+
+        Label topTitle = new Label(t("esim.intro.header"));
+        topTitle.getStyleClass().add("top-bar-title");
+
+        Region leftSpacer = new Region();
+        HBox.setHgrow(leftSpacer, Priority.ALWAYS);
+
+        Button settingsBtn = new Button("⚙");
+        settingsBtn.getStyleClass().add("top-bar-button");
+        settingsBtn.setDisable(true);
+
+                Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        topBar.getChildren().addAll(backBtn, leftSpacer, topTitle, rightSpacer, settingsBtn);
+
+        Label title = new Label(t("esim.intro.title"));
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("esim.intro.subtitle"));
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        Button card = new Button(t("esim.intro.card"));
+        card.getStyleClass().add("intro-card");
+        card.setOnAction(e -> buildMainSelectionScreen());
+
+        Label info = new Label(t("esim.intro.info"));
+        info.getStyleClass().add("info-banner");
+        info.setWrapText(true);
+
+        mainContainer.getChildren().addAll(topBar, title, subtitle, card, info);
+    }
+
+
+// --- ÉCRAN 1 : SÉLECTION DU PAYS ---
     private void buildMainSelectionScreen() {
         mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
         if (primaryStage != null) {
             primaryStage.setTitle(t("app.title"));
         }
 
 
         HBox header = buildHeader();
+        Button backBtn = new Button("<- " + t("nav.back"));
+        backBtn.getStyleClass().addAll("link-button", "back-button");
+        backBtn.setOnAction(e -> buildEsimIntroScreen());
+
         Label title = new Label(t("destinations.title"));
-        title.getStyleClass().add("page-title");
+        title.getStyleClass().add("page-title-dark");
         Label subtitle = new Label(t("destinations.subtitle"));
-        subtitle.getStyleClass().add("page-subtitle");
+        subtitle.getStyleClass().add("page-subtitle-dark");
 
         Label greeting = new Label(buildGreetingText());
         greeting.getStyleClass().add("greeting-label");
@@ -144,7 +202,7 @@ public class App extends Application {
         
         nextBtn.setOnAction(e -> showPlansPage(selectedCountryName, selectedCountryIso3));
 
-        mainContainer.getChildren().addAll(header, title, subtitle, greeting, searchField, scopeTabs, scrollPane, nextBtn);
+        mainContainer.getChildren().addAll(header, backBtn, title, subtitle, greeting, searchField, scopeTabs, scrollPane, nextBtn);
         isPlansPage = false;
         if (nextBtn != null) {
             nextBtn.setDisable(selectedCountryIso3 == null || selectedCountryIso3.isBlank());
@@ -156,6 +214,7 @@ public class App extends Application {
     // --- ÉCRAN 2 : LISTE DES OFFRES (Filtrée et Scrollable) ---
     private void showPlansPage(String countryName, String iso3) {
         mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
         isPlansPage = true;
         lastPlansCountryName = countryName;
         lastPlansCountryIso3 = iso3;
@@ -165,9 +224,9 @@ public class App extends Application {
         backBtn.setOnAction(e -> buildMainSelectionScreen());
 
         Label title = new Label(t("plans.title") + " " + countryName);
-        title.getStyleClass().add("page-title");
+        title.getStyleClass().add("page-title-dark");
         Label subtitle = new Label(t("plans.subtitle") + " " + countryName + ".");
-        subtitle.getStyleClass().add("page-subtitle");
+        subtitle.getStyleClass().add("page-subtitle-dark");
 
         // Conteneur interne pour les cartes
         VBox plansListContainer = new VBox(15);
@@ -268,14 +327,8 @@ public class App extends Application {
         logo.setPreserveRatio(true);
         logo.getStyleClass().add("logo");
 
-        Label brand = new Label("Akuunda Pay");
-        brand.getStyleClass().add("brand-title");
-
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        walletBalanceLabel = new Label(t("wallet.placeholder"));
-        walletBalanceLabel.getStyleClass().add("wallet-balance");
 
         ChoiceBox<String> langSelect = new ChoiceBox<>();
         langSelect.getItems().addAll("Francais", "English", "Deutsch", "Espanol", "中文");
@@ -296,14 +349,11 @@ public class App extends Application {
             if (isPlansPage && lastPlansCountryIso3 != null) {
                 showPlansPage(lastPlansCountryName, lastPlansCountryIso3);
             } else {
-                buildMainSelectionScreen();
+                buildEsimIntroScreen();
             }
         });
 
-        Button menu = new Button(t("nav.menu"));
-        menu.getStyleClass().add("ghost-button");
-
-        header.getChildren().addAll(logo, brand, spacer, walletBalanceLabel, langSelect, menu);
+        header.getChildren().addAll(logo, spacer, langSelect);
         return header;
     }
 
@@ -356,7 +406,7 @@ public class App extends Application {
         }
         if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
             walletBalanceLabel.setText(t("wallet.placeholder"));
-            return;
+                            return;
         }
         String url = BACKEND_BASE_URL + "/users/" + REALM_NAME + "/wallet-balance/user-id/" + BACKEND_USER_ID;
         new Thread(() -> {
@@ -637,6 +687,7 @@ public class App extends Application {
     private void openContinentWindow(String region, List<JSONObject> countries) {
         String localizedRegion = localizeRegion(region);
         mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
         isPlansPage = false;
 
         Button backBtn = new Button("<- " + t("nav.back"));
@@ -644,9 +695,9 @@ public class App extends Application {
         backBtn.setOnAction(e -> buildMainSelectionScreen());
 
         Label title = new Label(t("continent.title") + " " + localizedRegion);
-        title.getStyleClass().add("page-title");
+        title.getStyleClass().add("page-title-dark");
         Label subtitle = new Label(t("continent.subtitle") + " " + localizedRegion + ".");
-        subtitle.getStyleClass().add("page-subtitle");
+        subtitle.getStyleClass().add("page-subtitle-dark");
 
         VBox listContainer = new VBox(12);
         listContainer.setPadding(new Insets(10, 5, 10, 5));
@@ -906,7 +957,14 @@ public class App extends Application {
                         }
                     } else {
                         String body = response.body() == null ? "" : response.body();
-                        showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
+                        if (response.statusCode() == 409) {
+                            showAlert(t("alert.error"), t("errors.conflict"));
+                        } else if (response.statusCode() == 401) {
+                            showAlert(t("alert.error"), t("errors.token"));
+                        } else {
+                            showAlert(t("alert.error"), "HTTP " + response.statusCode() + "
+" + body);
+                        }
                     }
                 });
             } catch (Exception e) {
@@ -1269,6 +1327,7 @@ public class App extends Application {
         fr.put("errors.catalog", "Erreur catalogue:");
         fr.put("errors.ui", "Erreur UI:");
         fr.put("errors.network", "Erreur réseau :");
+        fr.put("errors.conflict", "Une souscription est déjà en cours pour cette SIM. Réessayez dans quelques minutes.");
         fr.put("plan.select", "Sélectionner");
         fr.put("plan.free", "Gratuit");
         fr.put("plan.defaultMeta", "Forfait eSIM");
@@ -1302,7 +1361,22 @@ public class App extends Application {
         fr.put("greeting.default", "Bonjour");
         fr.put("wallet.prefix", "Solde");
         fr.put("wallet.placeholder", "Solde: --");
-        fr.put("wallet.unavailable", "Solde indisponible");
+        fr.put("wallet.unavailable", "Solde indisponible");        fr.put("home.balance.label", "Votre solde disponible");
+        fr.put("home.balance.add", "+ Ajouter de l'argent");
+        fr.put("home.action.receive", "Recevoir");
+        fr.put("home.action.pay", "Payer");
+        fr.put("home.action.withdraw", "Retirer");
+        fr.put("home.action.history", "Historique");
+        fr.put("home.services", "Services");
+        fr.put("home.service.esim", "eSIM");
+        fr.put("home.service.send", "Envoyer");
+        fr.put("home.service.exchange", "Change devise");
+        fr.put("esim.intro.header", "eSIM");
+        fr.put("esim.intro.title", "Bienvenue dans la rubrique eSIM Orange");
+        fr.put("esim.intro.subtitle", "En cliquant sur l'option ci-dessous :");
+        fr.put("esim.intro.card", "Activer votre eSIM Orange  >");
+        fr.put("esim.intro.info", "Service uniquement disponible sur les téléphones compatibles eSim. Des frais de paiement de X € seront appliqués.");
+
 
         Map<String, String> en = new HashMap<>();
         en.put("app.title", "Akuunda Pay - eSIM");
@@ -1340,6 +1414,7 @@ public class App extends Application {
         en.put("alert.copied", "Copied");
         en.put("errors.product.invalid", "Invalid product.");
         en.put("errors.userId.required", "AKUUNDA_USER_ID is required to subscribe.");
+        en.put("errors.conflict", "A subscription is already pending for this SIM. Please try again in a few minutes.");
         en.put("subscribe.confirm.title", "eSIM subscription");
         en.put("subscribe.confirm.header", "Confirm subscription?");
         en.put("subscribe.confirm.body", "You are about to activate an eSIM plan for this country.");
@@ -1365,7 +1440,22 @@ public class App extends Application {
         en.put("greeting.default", "Hello");
         en.put("wallet.prefix", "Balance");
         en.put("wallet.placeholder", "Balance: --");
-        en.put("wallet.unavailable", "Balance unavailable");
+        en.put("wallet.unavailable", "Balance unavailable");        en.put("home.balance.label", "Available balance");
+        en.put("home.balance.add", "+ Add money");
+        en.put("home.action.receive", "Receive");
+        en.put("home.action.pay", "Pay");
+        en.put("home.action.withdraw", "Withdraw");
+        en.put("home.action.history", "History");
+        en.put("home.services", "Services");
+        en.put("home.service.esim", "eSIM");
+        en.put("home.service.send", "Send");
+        en.put("home.service.exchange", "Exchange");
+        en.put("esim.intro.header", "eSIM");
+        en.put("esim.intro.title", "Welcome to the Orange eSIM section");
+        en.put("esim.intro.subtitle", "Click the option below:");
+        en.put("esim.intro.card", "Activate your Orange eSIM  >");
+        en.put("esim.intro.info", "Service only available on eSIM compatible phones. Payment fees of X € will apply.");
+
 
         Map<String, String> de = new HashMap<>();
         de.put("app.title", "Akuunda Pay - eSIM");
@@ -1403,6 +1493,7 @@ public class App extends Application {
         de.put("alert.copied", "Kopiert");
         de.put("errors.product.invalid", "Ungültiges Produkt.");
         de.put("errors.userId.required", "AKUUNDA_USER_ID ist für die Buchung erforderlich.");
+        de.put("errors.conflict", "Eine Anfrage ist bereits für diese SIM ausstehend. Bitte in ein paar Minuten erneut versuchen.");
         de.put("subscribe.confirm.title", "eSIM-Buchung");
         de.put("subscribe.confirm.header", "Buchung bestätigen?");
         de.put("subscribe.confirm.body", "Du bist dabei, einen eSIM-Tarif für dieses Land zu aktivieren.");
@@ -1428,7 +1519,22 @@ public class App extends Application {
         de.put("greeting.default", "Hallo");
         de.put("wallet.prefix", "Guthaben");
         de.put("wallet.placeholder", "Guthaben: --");
-        de.put("wallet.unavailable", "Guthaben nicht verfugbar");
+        de.put("wallet.unavailable", "Guthaben nicht verfugbar");        de.put("home.balance.label", "Verfugbares Guthaben");
+        de.put("home.balance.add", "+ Geld einzahlen");
+        de.put("home.action.receive", "Empfangen");
+        de.put("home.action.pay", "Bezahlen");
+        de.put("home.action.withdraw", "Abheben");
+        de.put("home.action.history", "Historie");
+        de.put("home.services", "Services");
+        de.put("home.service.esim", "eSIM");
+        de.put("home.service.send", "Senden");
+        de.put("home.service.exchange", "Wechsel");
+        de.put("esim.intro.header", "eSIM");
+        de.put("esim.intro.title", "Willkommen im Orange eSIM Bereich");
+        de.put("esim.intro.subtitle", "Klicken Sie auf die folgende Option:");
+        de.put("esim.intro.card", "Orange eSIM aktivieren  >");
+        de.put("esim.intro.info", "Dienst nur auf eSIM-fahigen Telefonen verfugbar. Zahlungsgebuhren von X € fallen an.");
+
 
         Map<String, String> es = new HashMap<>();
         es.put("app.title", "Akuunda Pay - eSIM");
@@ -1466,6 +1572,7 @@ public class App extends Application {
         es.put("alert.copied", "Copiado");
         es.put("errors.product.invalid", "Producto inválido.");
         es.put("errors.userId.required", "AKUUNDA_USER_ID es necesario para la suscripción.");
+        es.put("errors.conflict", "Ya hay una suscripción pendiente para esta SIM. Inténtalo de nuevo en unos minutos.");
         es.put("subscribe.confirm.title", "Suscripción eSIM");
         es.put("subscribe.confirm.header", "¿Confirmar suscripción?");
         es.put("subscribe.confirm.body", "Vas a activar un plan eSIM para este país.");
@@ -1491,7 +1598,22 @@ public class App extends Application {
         es.put("greeting.default", "Hola");
         es.put("wallet.prefix", "Saldo");
         es.put("wallet.placeholder", "Saldo: --");
-        es.put("wallet.unavailable", "Saldo no disponible");
+        es.put("wallet.unavailable", "Saldo no disponible");        es.put("home.balance.label", "Saldo disponible");
+        es.put("home.balance.add", "+ Agregar dinero");
+        es.put("home.action.receive", "Recibir");
+        es.put("home.action.pay", "Pagar");
+        es.put("home.action.withdraw", "Retirar");
+        es.put("home.action.history", "Historial");
+        es.put("home.services", "Servicios");
+        es.put("home.service.esim", "eSIM");
+        es.put("home.service.send", "Enviar");
+        es.put("home.service.exchange", "Cambio");
+        es.put("esim.intro.header", "eSIM");
+        es.put("esim.intro.title", "Bienvenido a la seccion eSIM Orange");
+        es.put("esim.intro.subtitle", "Haz clic en la opcion siguiente:");
+        es.put("esim.intro.card", "Activar tu eSIM Orange  >");
+        es.put("esim.intro.info", "Servicio solo disponible en telefonos compatibles con eSIM. Se aplicaran tarifas de X €.");
+
 
         Map<String, String> zh = new HashMap<>();
         zh.put("continent.africa", "非洲");
@@ -1529,6 +1651,7 @@ public class App extends Application {
         zh.put("alert.copied", "已复制");
         zh.put("errors.product.invalid", "产品无效。");
         zh.put("errors.userId.required", "需要 AKUUNDA_USER_ID 才能订阅。");
+        zh.put("errors.conflict", "该 SIM 已有待处理的订阅，请稍后再试。");
         zh.put("subscribe.confirm.title", "eSIM 订阅");
         zh.put("subscribe.confirm.header", "确认订阅？");
         zh.put("subscribe.confirm.body", "您将激活该国家的 eSIM 套餐。");
@@ -1560,6 +1683,21 @@ public class App extends Application {
         dict.put("en", en);
         dict.put("de", de);
         dict.put("es", es);
+                zh.put("home.balance.label", "可用余额");
+        zh.put("home.balance.add", "+ 充值");
+        zh.put("home.action.receive", "收款");
+        zh.put("home.action.pay", "支付");
+        zh.put("home.action.withdraw", "提现");
+        zh.put("home.action.history", "历史");
+        zh.put("home.services", "服务");
+        zh.put("home.service.esim", "eSIM");
+        zh.put("home.service.send", "转账");
+        zh.put("home.service.exchange", "换汇");
+        zh.put("esim.intro.header", "eSIM");
+        zh.put("esim.intro.title", "欢迎使用 Orange eSIM");
+        zh.put("esim.intro.subtitle", "请点击以下选项：");
+        zh.put("esim.intro.card", "激活 Orange eSIM  >");
+        zh.put("esim.intro.info", "仅适用于支持 eSIM 的手机。将收取 X € 费用。");
         dict.put("zh", zh);
         return dict;
     }
@@ -1574,6 +1712,3 @@ public class App extends Application {
 
     public static void main(String[] args) { launch(); }
 }
-
-
-
