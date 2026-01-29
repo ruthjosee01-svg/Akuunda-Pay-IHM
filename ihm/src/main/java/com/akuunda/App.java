@@ -8,20 +8,32 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelReader;
+import javafx.scene.image.PixelWriter;
+import javafx.scene.image.WritableImage;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -45,6 +57,7 @@ public class App extends Application {
     private final String BACKEND_USER_ID = System.getenv("AKUUNDA_USER_ID");
     
     private VBox mainContainer;
+    private Stage primaryStage;
     private VBox destinationList;
     private TextField searchField;
     private ToggleGroup scopeGroup;
@@ -56,9 +69,22 @@ public class App extends Application {
     private String userCountryIso2 = null;
     private String userRegion = null;
     private Button nextBtn;
+    private String currentLang = "fr";
+    private boolean isPlansPage = false;
+    private String lastPlansCountryName = null;
+    private String lastPlansCountryIso3 = null;
+    private final Map<String, Map<String, String>> i18n = buildI18n();
+    private final Map<String, String> langLabels = Map.of(
+            "fr", "Francais",
+            "en", "English",
+            "de", "Deutsch",
+            "es", "Espanol",
+            "zh", "\u4e2d\u6587"
+    );
 
     @Override
     public void start(Stage stage) {
+        primaryStage = stage;
         mainContainer = new VBox(20);
         mainContainer.setPadding(new Insets(20, 25, 20, 25));
         mainContainer.getStyleClass().add("screen");
@@ -67,7 +93,7 @@ public class App extends Application {
         scene.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
         buildMainSelectionScreen();
 
-        stage.setTitle("Akuunda Pay - eSIM");
+        stage.setTitle(t("app.title"));
         stage.setScene(scene);
         stage.show();
 
@@ -79,13 +105,13 @@ public class App extends Application {
         mainContainer.getChildren().clear();
 
         HBox header = buildHeader();
-        Label title = new Label("Destinations");
+        Label title = new Label(t("destinations.title"));
         title.getStyleClass().add("page-title");
-        Label subtitle = new Label("Choisissez un pays pour afficher les offres eSIM.");
+        Label subtitle = new Label(t("destinations.subtitle"));
         subtitle.getStyleClass().add("page-subtitle");
 
         searchField = new TextField();
-        searchField.setPromptText("Rechercher une destination");
+        searchField.setPromptText(t("search.prompt"));
         searchField.getStyleClass().add("search-field");
         searchField.textProperty().addListener((obs, oldVal, newVal) -> applyFiltersAndRender());
 
@@ -100,7 +126,7 @@ public class App extends Application {
         scrollPane.getStyleClass().add("transparent-scroll");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
-        nextBtn = new Button("Continuer");
+        nextBtn = new Button(t("cta.viewPlans"));
         nextBtn.setMaxWidth(Double.MAX_VALUE);
         nextBtn.setMinHeight(55);
         nextBtn.setDisable(true);
@@ -109,20 +135,27 @@ public class App extends Application {
         nextBtn.setOnAction(e -> showPlansPage(selectedCountryName, selectedCountryIso3));
 
         mainContainer.getChildren().addAll(header, title, subtitle, searchField, scopeTabs, scrollPane, nextBtn);
+        isPlansPage = false;
+        if (nextBtn != null) {
+            nextBtn.setDisable(selectedCountryIso3 == null || selectedCountryIso3.isBlank());
+        }
         if (!allCountriesData.isEmpty()) applyFiltersAndRender();
     }
 
     // --- ÉCRAN 2 : LISTE DES OFFRES (Filtrée et Scrollable) ---
     private void showPlansPage(String countryName, String iso3) {
         mainContainer.getChildren().clear();
+        isPlansPage = true;
+        lastPlansCountryName = countryName;
+        lastPlansCountryIso3 = iso3;
         
-        Button backBtn = new Button("← Retour");
-        backBtn.getStyleClass().add("link-button");
+        Button backBtn = new Button("<- " + t("nav.back"));
+        backBtn.getStyleClass().addAll("link-button", "back-button");
         backBtn.setOnAction(e -> buildMainSelectionScreen());
 
-        Label title = new Label("Offres pour " + countryName);
+        Label title = new Label(t("plans.title") + " " + countryName);
         title.getStyleClass().add("page-title");
-        Label subtitle = new Label("Forfaits disponibles pour " + countryName + ".");
+        Label subtitle = new Label(t("plans.subtitle") + " " + countryName + ".");
         subtitle.getStyleClass().add("page-subtitle");
 
         // Conteneur interne pour les cartes
@@ -168,7 +201,7 @@ public class App extends Application {
                             int foundCount = 0;
 
                             if (products == null) {
-                                plansListContainer.getChildren().add(new Label("Catalogue invalide."));
+                                plansListContainer.getChildren().add(new Label(t("errors.catalog.invalid")));
                                 return;
                             }
 
@@ -187,7 +220,7 @@ public class App extends Application {
                             }
 
                             if (foundCount == 0) {
-                                plansListContainer.getChildren().add(new Label("Aucun forfait eSIM trouvé pour ce pays."));
+                                plansListContainer.getChildren().add(new Label(t("plans.none")));
                             }
                         } else {
                             String body = response.body() == null ? "" : response.body().strip();
@@ -195,9 +228,9 @@ public class App extends Application {
                                 body = body.substring(0, 200) + "...";
                             }
                             if (response.statusCode() == 401) {
-                                plansListContainer.getChildren().add(new Label("401 - Token manquant ou invalide."));
+                                plansListContainer.getChildren().add(new Label(t("errors.token")));
                             } else {
-                                plansListContainer.getChildren().add(new Label("Erreur catalogue: " + response.statusCode()));
+                                plansListContainer.getChildren().add(new Label(t("errors.catalog") + " " + response.statusCode()));
                             }
                             if (!body.isEmpty()) {
                                 plansListContainer.getChildren().add(new Label(body));
@@ -205,11 +238,11 @@ public class App extends Application {
                         }
                     } catch (Exception ex) {
                         ex.printStackTrace();
-                        plansListContainer.getChildren().add(new Label("Erreur UI: " + ex.getMessage()));
+                        plansListContainer.getChildren().add(new Label(t("errors.ui") + " " + ex.getMessage()));
                     }
                 });
             } catch (Exception e) {
-                Platform.runLater(() -> plansListContainer.getChildren().add(new Label("Erreur réseau : " + e.getMessage())));
+                Platform.runLater(() -> plansListContainer.getChildren().add(new Label(formatNetworkError(e))));
             }
         }).start();
     }
@@ -230,18 +263,41 @@ public class App extends Application {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button menu = new Button("≡");
+        ChoiceBox<String> langSelect = new ChoiceBox<>();
+        langSelect.getItems().addAll("Francais", "English", "Deutsch", "Espanol", "中文");
+        langSelect.setValue(langLabels.getOrDefault(currentLang, "Francais"));
+        langSelect.getStyleClass().add("lang-select");
+        langSelect.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            currentLang = switch (newVal) {
+                case "English" -> "en";
+                case "Deutsch" -> "de";
+                case "Espanol" -> "es";
+                case "中文" -> "zh";
+                default -> "fr";
+            };
+            if (primaryStage != null) {
+                primaryStage.setTitle(t("app.title"));
+            }
+            refreshSelectedCountryName();
+            if (isPlansPage && lastPlansCountryIso3 != null) {
+                showPlansPage(lastPlansCountryName, lastPlansCountryIso3);
+            } else {
+                buildMainSelectionScreen();
+            }
+        });
+
+        Button menu = new Button(t("nav.menu"));
         menu.getStyleClass().add("ghost-button");
 
-        header.getChildren().addAll(logo, brand, spacer, menu);
+        header.getChildren().addAll(logo, brand, spacer, langSelect, menu);
         return header;
     }
 
     private HBox buildScopeTabs() {
         scopeGroup = new ToggleGroup();
-        ToggleButton local = new ToggleButton("Local");
-        ToggleButton regional = new ToggleButton("Régional");
-        ToggleButton world = new ToggleButton("Monde");
+        ToggleButton local = new ToggleButton(t("scope.local"));
+        ToggleButton regional = new ToggleButton(t("scope.regional"));
+        ToggleButton world = new ToggleButton(t("scope.world"));
 
         local.setToggleGroup(scopeGroup);
         regional.setToggleGroup(scopeGroup);
@@ -275,7 +331,7 @@ public class App extends Application {
 
         List<JSONObject> filtered = new ArrayList<>();
         for (JSONObject country : allCountriesData) {
-            String name = country.getJSONObject("name").getString("common");
+            String name = getCountryDisplayName(country);
             String iso2 = country.optString("cca2", "");
             String region = country.optString("region", "");
 
@@ -298,7 +354,8 @@ public class App extends Application {
             }
             filtered.add(country);
         }
-        updateListView(filtered);
+        filtered.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
+        updateListView(filtered, scope);
     }
 
     private void detectUserRegion() {
@@ -333,7 +390,7 @@ public class App extends Application {
 
         java.util.regex.Matcher durationMatcher = java.util.regex.Pattern.compile("(\\d+)D").matcher(productId);
         if (durationMatcher.find()) {
-            duration = durationMatcher.group(1) + " jours";
+            duration = durationMatcher.group(1) + " " + localizeDurationUnit();
         }
 
         if (!data.isEmpty() && !duration.isEmpty()) {
@@ -345,7 +402,18 @@ public class App extends Application {
         if (!duration.isEmpty()) {
             return duration;
         }
-        return "Forfait eSIM";
+        return t("plan.defaultMeta");
+    }
+
+    private String localizeDurationUnit() {
+        return switch (currentLang) {
+            case "fr" -> "jours";
+            case "en" -> "days";
+            case "de" -> "Tage";
+            case "es" -> "dias";
+            case "zh" -> "\u5929";
+            default -> "days";
+        };
     }
 
     private boolean isCountryMatching(String target, JSONArray list) {
@@ -365,7 +433,7 @@ public class App extends Application {
         card.setPadding(new Insets(15));
         card.getStyleClass().add("plan-card");
 
-        String productId = def.optString("productId", "Forfait eSIM");
+        String productId = def.optString("productId", t("plan.defaultMeta"));
         String name = humanizeProductId(productId);
         double amount = extractAmount(product);
         String currency = extractCurrency(product);
@@ -380,7 +448,7 @@ public class App extends Application {
         Label metaLabel = new Label(meta);
         metaLabel.getStyleClass().add("plan-meta");
 
-        Button b = new Button("Sélectionner");
+        Button b = new Button(t("plan.select"));
         b.setMaxWidth(Double.MAX_VALUE);
         b.getStyleClass().add("primary-button");
         b.setOnAction(e -> confirmSubscribe(productId, amount));
@@ -396,13 +464,13 @@ public class App extends Application {
                 HttpClient client = HttpClient.newHttpClient();
                 // On récupère cca2/cca3 + region pour filtrer
                 HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create("https://restcountries.com/v3.1/all?fields=name,flags,cca3,cca2,region"))
+                        .uri(URI.create("https://restcountries.com/v3.1/all?fields=name,translations,flags,cca3,cca2,region"))
                         .build();
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 JSONArray array = new JSONArray(response.body());
                 List<JSONObject> list = new ArrayList<>();
                 for (int i = 0; i < array.length(); i++) list.add(array.getJSONObject(i));
-                list.sort(Comparator.comparing(c -> c.getJSONObject("name").getString("common").toLowerCase()));
+                list.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
                 allCountriesData = list;
                 detectUserRegion();
                 Platform.runLater(this::applyFiltersAndRender);
@@ -410,63 +478,267 @@ public class App extends Application {
         }).start();
     }
 
-    private void updateListView(List<JSONObject> countries) {
+        private void updateListView(List<JSONObject> countries, String scope) {
         destinationList.getChildren().clear();
+        if (countries == null || countries.isEmpty()) {
+            return;
+        }
+
+        if ("WORLD".equals(scope)) {
+            List<String> order = List.of("Africa", "Americas", "Asia", "Europe", "Oceania", "Antarctic", "Other");
+            Map<String, List<JSONObject>> grouped = new HashMap<>();
+            for (JSONObject country : countries) {
+                String region = country.optString("region", "Other");
+                if (region == null || region.isBlank()) {
+                    region = "Other";
+                }
+                grouped.computeIfAbsent(region, k -> new ArrayList<>()).add(country);
+            }
+            for (String region : order) {
+                List<JSONObject> list = grouped.get(region);
+                if (list == null || list.isEmpty()) {
+                    continue;
+                }
+                list.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
+                destinationList.getChildren().add(createContinentCard(region, list));
+            }
+            return;
+        }
+
+        countries.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
         for (JSONObject country : countries) {
-            String name = country.getJSONObject("name").getString("common");
-            String flag = country.getJSONObject("flags").getString("png");
-            String iso3 = country.getString("cca3");
-            String iso2 = country.optString("cca2", "");
-            String region = country.optString("region", "");
-            destinationList.getChildren().add(createCountryCard(name, flag, iso3, iso2, region));
+            destinationList.getChildren().add(createCountryCard(country));
         }
     }
 
-    private HBox createCountryCard(String name, String flagUrl, String iso3, String iso2, String region) {
+    private HBox createContinentCard(String region, List<JSONObject> countries) {
+        HBox card = new HBox(12);
+        card.setAlignment(Pos.CENTER_LEFT);
+        card.setPadding(new Insets(12));
+        card.getStyleClass().addAll("country-card", "continent-card");
+
+        Region icon = new Region();
+        icon.getStyleClass().add("continent-icon");
+        Label name = new Label(localizeRegion(region));
+        name.getStyleClass().add("continent-name");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Label count = new Label(String.valueOf(countries.size()));
+        count.getStyleClass().add("continent-count");
+        Label arrow = new Label("> ");
+        arrow.getStyleClass().add("continent-arrow");
+
+        card.getChildren().addAll(icon, name, spacer, count, arrow);
+        card.setOnMouseClicked(e -> openContinentWindow(region, countries));
+        return card;
+    }
+
+    private void openContinentWindow(String region, List<JSONObject> countries) {
+        Stage stage = new Stage();
+        String localizedRegion = localizeRegion(region);
+        stage.setTitle(t("continent.title") + " " + localizedRegion);
+
+        VBox root = new VBox(15);
+        Button backBtn = new Button("<- " + t("nav.back"));
+        backBtn.getStyleClass().addAll("link-button", "back-button");
+        backBtn.setOnAction(e -> stage.close());
+
+        root.setPadding(new Insets(20, 25, 20, 25));
+        root.getStyleClass().add("screen");
+
+        Label title = new Label(t("continent.title") + " " + localizedRegion);
+        title.getStyleClass().add("page-title");
+        Label subtitle = new Label(t("continent.subtitle"));
+        subtitle.getStyleClass().add("page-subtitle");
+
+        VBox list = new VBox(12);
+        list.getStyleClass().add("list-container");
+        countries.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
+        for (JSONObject country : countries) {
+            list.getChildren().add(createCountryCard(country, false, stage));
+        }
+
+        ScrollPane scrollPane = new ScrollPane(list);
+        scrollPane.setFitToWidth(true);
+        scrollPane.getStyleClass().add("transparent-scroll");
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+
+        root.getChildren().addAll(backBtn, title, subtitle, scrollPane);
+
+        Scene scene = new Scene(root, 420, 750);
+        scene.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
+        stage.setScene(scene);
+        stage.show();
+    }
+    private HBox createCountryCard(JSONObject country) {
+        return createCountryCard(country, true, null);
+    }
+
+    private HBox createCountryCard(JSONObject country, boolean trackSelection, Stage stageToClose) {
+        String name = getCountryDisplayName(country);
+        String flagUrl = "";
+        String iso3 = country.optString("cca3", "");
+        String iso2 = country.optString("cca2", "");
+        JSONObject flags = country.optJSONObject("flags");
+        if (flags != null) {
+            flagUrl = flags.optString("png", "");
+        }
+
         HBox card = new HBox(15);
         card.setAlignment(Pos.CENTER_LEFT);
         card.setPadding(new Insets(10));
         card.getStyleClass().add("country-card");
         
         try {
-            ImageView iv = new ImageView(new Image(flagUrl, true));
-            iv.setFitWidth(34);
-            iv.setPreserveRatio(true);
-            card.getChildren().add(iv);
+            if (flagUrl != null && !flagUrl.isBlank()) {
+                ImageView iv = new ImageView(new Image(flagUrl, true));
+                iv.setFitWidth(34);
+                iv.setPreserveRatio(true);
+                card.getChildren().add(iv);
+            }
         } catch (Exception e) {}
 
         Label n = new Label(name);
         n.getStyleClass().add("country-name");
         card.getChildren().add(n);
 
-        card.setOnMouseClicked(e -> {
-            if (selectedCountryCard != null) {
-                selectedCountryCard.getStyleClass().remove("country-card-selected");
-            }
+        if (trackSelection && selectedCountryIso3 != null && selectedCountryIso3.equalsIgnoreCase(iso3)) {
             selectedCountryCard = card;
-            this.selectedCountryName = name;
-            this.selectedCountryIso3 = iso3;
-            this.selectedCountryIso2 = iso2;
             card.getStyleClass().add("country-card-selected");
-            nextBtn.setDisable(false);
-        });
+        }
+
+        card.setOnMouseClicked(e -> handleCountryClick(country, card, trackSelection, stageToClose));
         return card;
+    }
+
+    private void selectCountry(JSONObject country, HBox card) {
+        if (selectedCountryCard != null) {
+            selectedCountryCard.getStyleClass().remove("country-card-selected");
+        }
+        selectedCountryCard = card;
+        if (card != null) {
+            card.getStyleClass().add("country-card-selected");
+        }
+        selectedCountryIso3 = country.optString("cca3", "");
+        selectedCountryIso2 = country.optString("cca2", "");
+        selectedCountryName = getCountryDisplayName(country);
+        if (nextBtn != null) {
+            nextBtn.setDisable(selectedCountryIso3 == null || selectedCountryIso3.isBlank());
+        }
+    }
+
+    private void handleCountryClick(JSONObject country, HBox card, boolean trackSelection, Stage stageToClose) {
+        selectCountry(country, trackSelection ? card : null);
+        if (stageToClose != null) {
+            stageToClose.close();
+        }
+        if (selectedCountryIso3 != null && !selectedCountryIso3.isBlank()) {
+            showPlansPage(selectedCountryName, selectedCountryIso3);
+        }
+    }
+
+    private void refreshSelectedCountryName() {
+        if (selectedCountryIso3 != null && !selectedCountryIso3.isBlank()) {
+            JSONObject country = findCountryByIso3(selectedCountryIso3);
+            if (country != null) {
+                selectedCountryName = getCountryDisplayName(country);
+            }
+        }
+        if (lastPlansCountryIso3 != null && !lastPlansCountryIso3.isBlank()) {
+            JSONObject country = findCountryByIso3(lastPlansCountryIso3);
+            if (country != null) {
+                lastPlansCountryName = getCountryDisplayName(country);
+            }
+        }
+    }
+
+    private JSONObject findCountryByIso3(String iso3) {
+        if (iso3 == null || iso3.isBlank() || allCountriesData == null) {
+            return null;
+        }
+        for (JSONObject country : allCountriesData) {
+            String code = country.optString("cca3", "");
+            if (iso3.equalsIgnoreCase(code)) {
+                return country;
+            }
+        }
+        return null;
+    }
+
+    private String getCountryDisplayName(JSONObject country) {
+        if (country == null) {
+            return "";
+        }
+        String langKey = switch (currentLang) {
+            case "fr" -> "fra";
+            case "en" -> "eng";
+            case "de" -> "deu";
+            case "es" -> "spa";
+            case "zh" -> "zho";
+            default -> "eng";
+        };
+        JSONObject translations = country.optJSONObject("translations");
+        if (translations != null) {
+            JSONObject tr = translations.optJSONObject(langKey);
+            if (tr != null) {
+                String common = tr.optString("common", "");
+                if (common != null && !common.isBlank()) {
+                    return common;
+                }
+            }
+        }
+        JSONObject name = country.optJSONObject("name");
+        if (name != null) {
+            return name.optString("common", "");
+        }
+        return "";
+    }
+
+    private String localizeRegion(String region) {
+        if (region == null || region.isBlank()) {
+            return t("continent.other");
+        }
+        String normalized = region.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "africa" -> t("continent.africa");
+            case "americas" -> t("continent.americas");
+            case "asia" -> t("continent.asia");
+            case "europe" -> t("continent.europe");
+            case "oceania" -> t("continent.oceania");
+            case "antarctic" -> t("continent.antarctic");
+            case "other" -> t("continent.other");
+            default -> region;
+        };
+    }
+
+    private void applyDialogTheme(DialogPane pane) {
+        if (pane == null) {
+            return;
+        }
+        var css = getClass().getResource("/css/style.css");
+        if (css != null) {
+            String cssPath = css.toExternalForm();
+            if (!pane.getStylesheets().contains(cssPath)) {
+                pane.getStylesheets().add(cssPath);
+            }
+        }
     }
 
     private void confirmSubscribe(String productId, double amount) {
         if (productId == null || productId.isBlank()) {
-            showAlert("Erreur", "Produit invalide.");
+            showAlert(t("alert.error"), t("errors.product.invalid"));
             return;
         }
         if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
-            showAlert("Erreur", "AKUUNDA_USER_ID est requis pour la souscription.");
+            showAlert(t("alert.error"), t("errors.userId.required"));
             return;
         }
 
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
-        alert.setTitle("Souscription eSIM");
-        alert.setHeaderText("Confirmer la souscription ?");
-        alert.setContentText("Vous allez activer un forfait eSIM pour ce pays.");
+        alert.setTitle(t("subscribe.confirm.title"));
+        alert.setHeaderText(t("subscribe.confirm.header"));
+        alert.setContentText(t("subscribe.confirm.body"));
+        applyDialogTheme(alert.getDialogPane());
         alert.showAndWait().ifPresent(result -> {
             if (result == ButtonType.OK) {
                 subscribeProduct(productId, amount);
@@ -476,10 +748,11 @@ public class App extends Application {
 
     private void subscribeProduct(String productId, double amount) {
         Dialog<Void> loading = new Dialog<>();
-        loading.setTitle("Souscription");
+        loading.setTitle(t("subscribe.loading.title"));
         loading.getDialogPane().setContent(new ProgressIndicator());
         loading.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
-        loading.setHeaderText("Souscription en cours...");
+        loading.setHeaderText(t("subscribe.loading.header"));
+        applyDialogTheme(loading.getDialogPane());
         loading.show();
 
         new Thread(() -> {
@@ -515,7 +788,7 @@ public class App extends Application {
                             String qrCodeValue = body.optString("qrCodeValue", "");
                             String qrCodeDataUrl = body.optString("qrCodeDataUrl", "");
 
-                            String message = "Souscription OK\n" +
+                            String message = t("subscribe.success") + "\n" +
                                     "subscriptionId: " + subscriptionId + "\n" +
                                     "simSerial: " + serial + "\n" +
                                     "activationCode: " + activationCode;
@@ -531,20 +804,20 @@ public class App extends Application {
                                 if (transactionStatus != null && !transactionStatus.isBlank()) {
                                     fallback += "\ntransactionStatus: " + transactionStatus;
                                 }
-                                showAlert("Succès", fallback);
+                                showAlert(t("alert.success"), fallback);
                             }
                         } catch (Exception ex) {
-                            showAlert("Succès", "Souscription OK (réponse non parsable).");
+                            showAlert(t("alert.success"), t("subscribe.success.unparsed"));
                         }
                     } else {
                         String body = response.body() == null ? "" : response.body();
-                        showAlert("Erreur", "HTTP " + response.statusCode() + "\n" + body);
+                        showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
                     }
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     loading.close();
-                    showAlert("Erreur", e.getMessage());
+                    showAlert(t("alert.error"), e.getMessage());
                 });
             }
         }).start();
@@ -552,12 +825,13 @@ public class App extends Application {
 
     private void showActivationPendingAndPoll(String transactionId, String simSerial) {
         Dialog<Void> dialog = new Dialog<>();
-        dialog.setTitle("Activation eSIM");
+        dialog.setTitle(t("activation.title"));
         dialog.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
-        Label statusLabel = new Label("Activation en cours...");
+        Label statusLabel = new Label(t("activation.inProgress"));
         VBox content = new VBox(10, new ProgressIndicator(), statusLabel);
         content.setAlignment(Pos.CENTER_LEFT);
         dialog.getDialogPane().setContent(content);
+        applyDialogTheme(dialog.getDialogPane());
 
         final boolean[] canceled = {false};
         dialog.setOnCloseRequest(e -> canceled[0] = true);
@@ -581,7 +855,7 @@ public class App extends Application {
                     }
                     String normalized = asyncStatus == null ? "" : asyncStatus.trim().toUpperCase();
                     if ("DONE".equals(normalized) || "SUCCESS".equals(normalized)) {
-                        Platform.runLater(() -> statusLabel.setText("Activation terminée. Récupération du QR..."));
+                        Platform.runLater(() -> statusLabel.setText(t("activation.fetchingQr")));
                         JSONObject esim = fetchEsimDetails(client, simSerial);
                         Platform.runLater(() -> {
                             dialog.close();
@@ -594,12 +868,12 @@ public class App extends Application {
                                     qrValue = qrCode.optString("value", "");
                                     qrDataUrl = qrCode.optString("dataUrl", "");
                                 }
-                                String message = "Activation OK\n" +
+                                String message = t("activation.success") + "\n" +
                                         "simSerial: " + simSerial + "\n" +
                                         "activationCode: " + activationCode;
                                 showSuccessWithQr(message, qrValue, qrDataUrl);
                             } else {
-                                showAlert("Activation", "Activation terminée, mais QR non récupéré.");
+                                showAlert(t("activation.title"), t("activation.qr.missing"));
                             }
                         });
                         return;
@@ -607,23 +881,23 @@ public class App extends Application {
                     if ("ERROR".equals(normalized)) {
                         Platform.runLater(() -> {
                             dialog.close();
-                            showAlert("Erreur", "Activation eSIM en échec.");
+                            showAlert(t("alert.error"), t("activation.fail"));
                         });
                         return;
                     }
 
                     int current = i;
-                    Platform.runLater(() -> statusLabel.setText("Activation en cours... (" + current + "/" + attempts + ")"));
+                    Platform.runLater(() -> statusLabel.setText(t("activation.inProgress") + " (" + current + "/" + attempts + ")"));
                     Thread.sleep(delayMs);
                 }
                 Platform.runLater(() -> {
                     dialog.close();
-                    showAlert("Activation", "Activation toujours en cours. Réessayez plus tard.");
+                    showAlert(t("activation.title"), t("activation.retry"));
                 });
             } catch (Exception e) {
                 Platform.runLater(() -> {
                     dialog.close();
-                    showAlert("Erreur", e.getMessage());
+                    showAlert(t("alert.error"), e.getMessage());
                 });
             }
         }).start();
@@ -702,7 +976,7 @@ public class App extends Application {
 
     private String formatPrice(double amount, String currency) {
         if (amount <= 0) {
-            return "Gratuit";
+            return t("plan.free");
         }
         if (currency == null || currency.isBlank()) {
             return String.format("%.2f", amount);
@@ -712,31 +986,47 @@ public class App extends Application {
 
     private void showSuccessWithQr(String message, String qrCodeValue, String qrCodeDataUrl) {
         Dialog<Void> dialog = new Dialog<>();
-        dialog.setTitle("Succès");
+        dialog.setTitle(t("alert.success"));
         dialog.getDialogPane().getButtonTypes().add(ButtonType.OK);
+        applyDialogTheme(dialog.getDialogPane());
 
-        Label title = new Label("Votre eSIM est prête");
+        Label title = new Label(t("success.title"));
         title.getStyleClass().add("dialog-title");
-        Label subtitle = new Label("Scannez le QR code pour installer l'eSIM.");
+        Label subtitle = new Label(t("success.subtitle"));
         subtitle.getStyleClass().add("dialog-subtitle");
 
-        ImageView qrView = buildQrImageView(qrCodeDataUrl);
+        byte[] qrBytes = decodeQrBytes(qrCodeDataUrl);
+        ImageView qrView = buildQrImageView(qrBytes);
         VBox content = new VBox(12, title, subtitle);
         content.getStyleClass().add("dialog-content");
 
         if (qrView != null) {
-            content.getChildren().add(qrView);
+            StackPane qrCard = new StackPane(qrView);
+            qrCard.getStyleClass().add("qr-card");
+
+            Button download = new Button(t("success.download"));
+            download.getStyleClass().addAll("secondary-button", "qr-download");
+            download.setOnAction(e -> {
+                Window owner = dialog.getDialogPane().getScene() != null
+                        ? dialog.getDialogPane().getScene().getWindow()
+                        : null;
+                saveQrCode(qrBytes, owner);
+            });
+
+            VBox qrBox = new VBox(10, qrCard, download);
+            qrBox.setAlignment(Pos.CENTER);
+            content.getChildren().add(qrBox);
         }
         if (qrCodeValue != null && !qrCodeValue.isBlank()) {
             Label lpa = new Label("LPA: " + qrCodeValue);
             lpa.getStyleClass().add("dialog-lpa");
-            Button copy = new Button("Copier le code LPA");
+            Button copy = new Button(t("success.copy"));
             copy.getStyleClass().add("secondary-button");
             copy.setOnAction(e -> copyToClipboard(qrCodeValue));
             content.getChildren().addAll(lpa, copy);
         }
 
-        Label nextSteps = new Label("Ensuite, activez les donnees mobiles sur votre iPhone/Android.");
+        Label nextSteps = new Label(t("success.next"));
         nextSteps.getStyleClass().add("dialog-hint");
         content.getChildren().add(nextSteps);
 
@@ -744,7 +1034,7 @@ public class App extends Application {
         dialog.showAndWait();
     }
 
-    private ImageView buildQrImageView(String dataUrl) {
+    private byte[] decodeQrBytes(String dataUrl) {
         if (dataUrl == null || dataUrl.isBlank()) {
             return null;
         }
@@ -755,14 +1045,76 @@ public class App extends Application {
         }
         String base64 = dataUrl.substring(idx + prefix.length());
         try {
-            byte[] bytes = java.util.Base64.getDecoder().decode(base64);
-            Image img = new Image(new java.io.ByteArrayInputStream(bytes));
-            ImageView view = new ImageView(img);
+            return java.util.Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private ImageView buildQrImageView(byte[] qrBytes) {
+        if (qrBytes == null || qrBytes.length == 0) {
+            return null;
+        }
+        try {
+            Image img = new Image(new ByteArrayInputStream(qrBytes));
+            Image styled = stylizeQrImage(img);
+            ImageView view = new ImageView(styled != null ? styled : img);
             view.setFitWidth(180);
             view.setPreserveRatio(true);
             return view;
-        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
             return null;
+        }
+    }
+
+    private Image stylizeQrImage(Image source) {
+        if (source == null || source.isError()) {
+            return source;
+        }
+        int width = (int) source.getWidth();
+        int height = (int) source.getHeight();
+        if (width <= 0 || height <= 0) {
+            return source;
+        }
+        PixelReader reader = source.getPixelReader();
+        if (reader == null) {
+            return source;
+        }
+        WritableImage out = new WritableImage(width, height);
+        PixelWriter writer = out.getPixelWriter();
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Color c = reader.getColor(x, y);
+                double alpha = c.getOpacity();
+                double brightness = (c.getRed() + c.getGreen() + c.getBlue()) / 3.0;
+                if (alpha < 0.05 || brightness > 0.9) {
+                    writer.setColor(x, y, Color.TRANSPARENT);
+                } else {
+                    writer.setColor(x, y, Color.WHITE);
+                }
+            }
+        }
+        return out;
+    }
+
+    private void saveQrCode(byte[] qrBytes, Window owner) {
+        if (qrBytes == null || qrBytes.length == 0) {
+            showAlert(t("alert.error"), t("errors.qr.download"));
+            return;
+        }
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(t("success.download"));
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PNG", "*.png"));
+        chooser.setInitialFileName("esim-qr.png");
+        File file = chooser.showSaveDialog(owner);
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.write(file.toPath(), qrBytes);
+            showAlert(t("alert.success"), t("success.download.done"));
+        } catch (IOException e) {
+            showAlert(t("alert.error"), t("errors.qr.download"));
         }
     }
 
@@ -770,7 +1122,7 @@ public class App extends Application {
         ClipboardContent content = new ClipboardContent();
         content.putString(value);
         Clipboard.getSystemClipboard().setContent(content);
-        showAlert("Copié", "Le code LPA a été copié.");
+        showAlert(t("alert.copied"), t("clipboard.copied"));
     }
 
     private void showAlert(String title, String message) {
@@ -778,8 +1130,325 @@ public class App extends Application {
         alert.setTitle(title);
         alert.setHeaderText(null);
         alert.setContentText(message);
+        applyDialogTheme(alert.getDialogPane());
         alert.showAndWait();
+    }
+
+    private String formatNetworkError(Exception e) {
+        String message = e == null ? "" : e.getMessage();
+        if (message == null || message.isBlank()) {
+            String type = e == null ? "Exception" : e.getClass().getSimpleName();
+            return t("errors.network") + " " + type;
+        }
+        return t("errors.network") + " " + message;
+    }
+
+    private Map<String, Map<String, String>> buildI18n() {
+        Map<String, Map<String, String>> dict = new HashMap<>();
+
+        Map<String, String> fr = new HashMap<>();
+        fr.put("app.title", "Akuunda Pay - eSIM");
+        fr.put("destinations.title", "Destinations");
+        fr.put("destinations.subtitle", "Choisissez un pays pour afficher les offres eSIM.");
+        fr.put("search.prompt", "Rechercher une destination");
+        fr.put("scope.local", "LOCAL");
+        fr.put("scope.regional", "REGIONAL");
+        fr.put("scope.world", "MONDE");
+        fr.put("continent.africa", "Afrique");
+        fr.put("continent.americas", "Ameriques");
+        fr.put("continent.asia", "Asie");
+        fr.put("continent.europe", "Europe");
+        fr.put("continent.oceania", "Oceanie");
+        fr.put("continent.antarctic", "Antarctique");
+        fr.put("continent.other", "Autres");
+        fr.put("cta.viewPlans", "Voir les forfaits");
+        fr.put("nav.back", "Retour");
+        fr.put("nav.menu", "MENU");
+        fr.put("plans.title", "Offres pour");
+        fr.put("plans.subtitle", "Forfaits disponibles pour");
+        fr.put("plans.none", "Aucun forfait eSIM trouvé pour ce pays.");
+        fr.put("errors.catalog.invalid", "Catalogue invalide.");
+        fr.put("errors.token", "401 - Token manquant ou invalide.");
+        fr.put("errors.catalog", "Erreur catalogue:");
+        fr.put("errors.ui", "Erreur UI:");
+        fr.put("errors.network", "Erreur réseau :");
+        fr.put("plan.select", "Sélectionner");
+        fr.put("plan.free", "Gratuit");
+        fr.put("plan.defaultMeta", "Forfait eSIM");
+        fr.put("alert.error", "Erreur");
+        fr.put("alert.success", "Succès");
+        fr.put("alert.copied", "Copié");
+        fr.put("errors.product.invalid", "Produit invalide.");
+        fr.put("errors.userId.required", "AKUUNDA_USER_ID est requis pour la souscription.");
+        fr.put("subscribe.confirm.title", "Souscription eSIM");
+        fr.put("subscribe.confirm.header", "Confirmer la souscription ?");
+        fr.put("subscribe.confirm.body", "Vous allez activer un forfait eSIM pour ce pays.");
+        fr.put("subscribe.loading.title", "Souscription");
+        fr.put("subscribe.loading.header", "Souscription en cours...");
+        fr.put("subscribe.success.unparsed", "Souscription OK (réponse non parsable).");
+        fr.put("subscribe.success", "Souscription OK");
+        fr.put("activation.title", "Activation eSIM");
+        fr.put("activation.inProgress", "Activation en cours...");
+        fr.put("activation.fetchingQr", "Activation terminée. Récupération du QR...");
+        fr.put("activation.qr.missing", "Activation terminée, mais QR non récupéré.");
+        fr.put("activation.fail", "Activation eSIM en échec.");
+        fr.put("activation.retry", "Activation toujours en cours. Réessayez plus tard.");
+        fr.put("activation.success", "Activation OK");
+        fr.put("success.title", "Votre eSIM est prête");
+        fr.put("success.subtitle", "Scannez le QR code pour installer l'eSIM.");
+        fr.put("success.copy", "Copier le code LPA");
+        fr.put("success.download", "Telecharger le QR");
+        fr.put("success.download.done", "QR telecharge.");
+        fr.put("errors.qr.download", "Echec du telechargement du QR.");
+        fr.put("success.next", "Ensuite, activez les donnees mobiles sur votre iPhone/Android.");
+        fr.put("clipboard.copied", "Le code LPA a été copié.");
+
+        Map<String, String> en = new HashMap<>();
+        en.put("app.title", "Akuunda Pay - eSIM");
+        en.put("destinations.title", "Destinations");
+        en.put("destinations.subtitle", "Pick a country to view available eSIM plans.");
+        en.put("search.prompt", "Search a destination");
+        en.put("scope.local", "LOCAL");
+        en.put("scope.regional", "REGIONAL");
+        en.put("scope.world", "WORLD");
+        en.put("continent.africa", "Africa");
+        en.put("continent.americas", "Americas");
+        en.put("continent.asia", "Asia");
+        en.put("continent.europe", "Europe");
+        en.put("continent.oceania", "Oceania");
+        en.put("continent.antarctic", "Antarctic");
+        en.put("continent.other", "Other");
+        en.put("cta.viewPlans", "View plans");
+        en.put("nav.back", "Back");
+        en.put("nav.menu", "MENU");
+        en.put("plans.title", "Plans for");
+        en.put("plans.subtitle", "Available plans for");
+        en.put("plans.none", "No eSIM plans found for this country.");
+        en.put("errors.catalog.invalid", "Invalid catalog.");
+        en.put("errors.token", "401 - Missing or invalid token.");
+        en.put("errors.catalog", "Catalog error:");
+        en.put("errors.ui", "UI error:");
+        en.put("errors.network", "Network error:");
+        en.put("plan.select", "Select");
+        en.put("plan.free", "Free");
+        en.put("plan.defaultMeta", "eSIM plan");
+        en.put("alert.error", "Error");
+        en.put("alert.success", "Success");
+        en.put("alert.copied", "Copied");
+        en.put("errors.product.invalid", "Invalid product.");
+        en.put("errors.userId.required", "AKUUNDA_USER_ID is required to subscribe.");
+        en.put("subscribe.confirm.title", "eSIM subscription");
+        en.put("subscribe.confirm.header", "Confirm subscription?");
+        en.put("subscribe.confirm.body", "You are about to activate an eSIM plan for this country.");
+        en.put("subscribe.loading.title", "Subscription");
+        en.put("subscribe.loading.header", "Subscription in progress...");
+        en.put("subscribe.success.unparsed", "Subscription OK (unparsable response).");
+        en.put("subscribe.success", "Subscription OK");
+        en.put("activation.title", "eSIM activation");
+        en.put("activation.inProgress", "Activation in progress...");
+        en.put("activation.fetchingQr", "Activation complete. Fetching QR...");
+        en.put("activation.qr.missing", "Activation complete, but QR could not be retrieved.");
+        en.put("activation.fail", "eSIM activation failed.");
+        en.put("activation.retry", "Activation still in progress. Please try again later.");
+        en.put("activation.success", "Activation OK");
+        en.put("success.title", "Your eSIM is ready");
+        en.put("success.subtitle", "Scan the QR code to install the eSIM.");
+        en.put("success.copy", "Copy LPA code");
+        en.put("success.download", "Download QR");
+        en.put("success.download.done", "QR downloaded.");
+        en.put("errors.qr.download", "Failed to download QR.");
+        en.put("success.next", "Then enable cellular data on your iPhone/Android.");
+        en.put("clipboard.copied", "The LPA code has been copied.");
+
+        Map<String, String> de = new HashMap<>();
+        de.put("app.title", "Akuunda Pay - eSIM");
+        de.put("destinations.title", "Reiseziele");
+        de.put("destinations.subtitle", "Wähle ein Land, um verfügbare eSIM-Angebote zu sehen.");
+        de.put("search.prompt", "Ziel suchen");
+        de.put("scope.local", "LOKAL");
+        de.put("scope.regional", "REGIONAL");
+        de.put("scope.world", "WELT");
+        de.put("continent.africa", "Afrika");
+        de.put("continent.americas", "Amerika");
+        de.put("continent.asia", "Asien");
+        de.put("continent.europe", "Europa");
+        de.put("continent.oceania", "Ozeanien");
+        de.put("continent.antarctic", "Antarktis");
+        de.put("continent.other", "Andere");
+        de.put("cta.viewPlans", "Tarife anzeigen");
+        de.put("nav.back", "Zurück");
+        de.put("nav.menu", "MENU");
+        de.put("plans.title", "Angebote für");
+        de.put("plans.subtitle", "Verfügbare Tarife für");
+        de.put("plans.none", "Keine eSIM-Tarife für dieses Land gefunden.");
+        de.put("errors.catalog.invalid", "Ungültiger Katalog.");
+        de.put("errors.token", "401 - Token fehlt oder ist ungültig.");
+        de.put("errors.catalog", "Katalogfehler:");
+        de.put("errors.ui", "UI-Fehler:");
+        de.put("errors.network", "Netzwerkfehler:");
+        de.put("plan.select", "Auswählen");
+        de.put("plan.free", "Kostenlos");
+        de.put("plan.defaultMeta", "eSIM-Tarif");
+        de.put("alert.error", "Fehler");
+        de.put("alert.success", "Erfolg");
+        de.put("alert.copied", "Kopiert");
+        de.put("errors.product.invalid", "Ungültiges Produkt.");
+        de.put("errors.userId.required", "AKUUNDA_USER_ID ist für die Buchung erforderlich.");
+        de.put("subscribe.confirm.title", "eSIM-Buchung");
+        de.put("subscribe.confirm.header", "Buchung bestätigen?");
+        de.put("subscribe.confirm.body", "Du bist dabei, einen eSIM-Tarif für dieses Land zu aktivieren.");
+        de.put("subscribe.loading.title", "Buchung");
+        de.put("subscribe.loading.header", "Buchung läuft...");
+        de.put("subscribe.success.unparsed", "Buchung OK (Antwort nicht interpretierbar).");
+        de.put("subscribe.success", "Buchung OK");
+        de.put("activation.title", "eSIM-Aktivierung");
+        de.put("activation.inProgress", "Aktivierung läuft...");
+        de.put("activation.fetchingQr", "Aktivierung abgeschlossen. QR wird geladen...");
+        de.put("activation.qr.missing", "Aktivierung abgeschlossen, aber QR nicht erhalten.");
+        de.put("activation.fail", "eSIM-Aktivierung fehlgeschlagen.");
+        de.put("activation.retry", "Aktivierung läuft noch. Bitte später erneut versuchen.");
+        de.put("activation.success", "Aktivierung OK");
+        de.put("success.title", "Deine eSIM ist bereit");
+        de.put("success.subtitle", "Scanne den QR-Code, um die eSIM zu installieren.");
+        de.put("success.copy", "LPA-Code kopieren");
+        de.put("success.download", "QR herunterladen");
+        de.put("success.download.done", "QR heruntergeladen.");
+        de.put("errors.qr.download", "QR-Download fehlgeschlagen.");
+        de.put("success.next", "Aktiviere anschließend mobile Daten auf deinem iPhone/Android.");
+        de.put("clipboard.copied", "Der LPA-Code wurde kopiert.");
+
+        Map<String, String> es = new HashMap<>();
+        es.put("app.title", "Akuunda Pay - eSIM");
+        es.put("destinations.title", "Destinos");
+        es.put("destinations.subtitle", "Elige un país para ver los planes eSIM disponibles.");
+        es.put("search.prompt", "Buscar destino");
+        es.put("scope.local", "LOCAL");
+        es.put("scope.regional", "REGIONAL");
+        es.put("scope.world", "MUNDO");
+        es.put("continent.africa", "Africa");
+        es.put("continent.americas", "America");
+        es.put("continent.asia", "Asia");
+        es.put("continent.europe", "Europa");
+        es.put("continent.oceania", "Oceania");
+        es.put("continent.antarctic", "Antartida");
+        es.put("continent.other", "Otros");
+        es.put("cta.viewPlans", "Ver planes");
+        es.put("nav.back", "Volver");
+        es.put("nav.menu", "MENU");
+        es.put("plans.title", "Planes para");
+        es.put("plans.subtitle", "Planes disponibles para");
+        es.put("plans.none", "No se encontraron planes eSIM para este país.");
+        es.put("errors.catalog.invalid", "Catálogo inválido.");
+        es.put("errors.token", "401 - Token faltante o inválido.");
+        es.put("errors.catalog", "Error de catálogo:");
+        es.put("errors.ui", "Error de UI:");
+        es.put("errors.network", "Error de red:");
+        es.put("plan.select", "Seleccionar");
+        es.put("plan.free", "Gratis");
+        es.put("plan.defaultMeta", "Plan eSIM");
+        es.put("alert.error", "Error");
+        es.put("alert.success", "Éxito");
+        es.put("alert.copied", "Copiado");
+        es.put("errors.product.invalid", "Producto inválido.");
+        es.put("errors.userId.required", "AKUUNDA_USER_ID es necesario para la suscripción.");
+        es.put("subscribe.confirm.title", "Suscripción eSIM");
+        es.put("subscribe.confirm.header", "¿Confirmar suscripción?");
+        es.put("subscribe.confirm.body", "Vas a activar un plan eSIM para este país.");
+        es.put("subscribe.loading.title", "Suscripción");
+        es.put("subscribe.loading.header", "Suscripción en curso...");
+        es.put("subscribe.success.unparsed", "Suscripción OK (respuesta no interpretable).");
+        es.put("subscribe.success", "Suscripción OK");
+        es.put("activation.title", "Activación eSIM");
+        es.put("activation.inProgress", "Activación en curso...");
+        es.put("activation.fetchingQr", "Activación terminada. Cargando QR...");
+        es.put("activation.qr.missing", "Activación terminada, pero no se obtuvo el QR.");
+        es.put("activation.fail", "Fallo en la activación eSIM.");
+        es.put("activation.retry", "Activación aún en curso. Inténtalo de nuevo más tarde.");
+        es.put("activation.success", "Activación OK");
+        es.put("success.title", "Tu eSIM está lista");
+        es.put("success.subtitle", "Escanea el código QR para instalar la eSIM.");
+        es.put("success.copy", "Copiar código LPA");
+        es.put("success.download", "Descargar QR");
+        es.put("success.download.done", "QR descargado.");
+        es.put("errors.qr.download", "Fallo al descargar el QR.");
+        es.put("success.next", "Luego activa los datos móviles en tu iPhone/Android.");
+        es.put("clipboard.copied", "El código LPA se ha copiado.");
+
+        Map<String, String> zh = new HashMap<>();
+        zh.put("continent.africa", "非洲");
+        zh.put("continent.americas", "美洲");
+        zh.put("continent.asia", "亚洲");
+        zh.put("continent.europe", "欧洲");
+        zh.put("continent.oceania", "大洋洲");
+        zh.put("continent.antarctic", "南极洲");
+        zh.put("continent.other", "其他");
+        zh.put("app.title", "Akuunda Pay - eSIM");
+        zh.put("destinations.title", "目的地");
+        zh.put("destinations.subtitle", "选择一个国家查看 eSIM 套餐。");
+        zh.put("search.prompt", "搜索目的地");
+        zh.put("scope.local", "本地");
+        zh.put("scope.regional", "区域");
+        zh.put("scope.world", "全球");
+        zh.put("cta.viewPlans", "查看套餐");
+        zh.put("nav.back", "返回");
+        zh.put("nav.menu", "菜单");
+        zh.put("plans.title", "套餐适用于");
+        zh.put("plans.subtitle", "可用套餐：");
+        zh.put("plans.none", "该国家暂无 eSIM 套餐。");
+        zh.put("errors.catalog.invalid", "套餐目录无效。");
+        zh.put("errors.token", "401 - 缺少或无效 token。");
+        zh.put("errors.catalog", "套餐目录错误：");
+        zh.put("errors.ui", "UI 错误：");
+        zh.put("errors.network", "网络错误：");
+        zh.put("plan.select", "选择");
+        zh.put("plan.free", "免费");
+        zh.put("plan.defaultMeta", "eSIM 套餐");
+        zh.put("alert.error", "错误");
+        zh.put("alert.success", "成功");
+        zh.put("alert.copied", "已复制");
+        zh.put("errors.product.invalid", "产品无效。");
+        zh.put("errors.userId.required", "需要 AKUUNDA_USER_ID 才能订阅。");
+        zh.put("subscribe.confirm.title", "eSIM 订阅");
+        zh.put("subscribe.confirm.header", "确认订阅？");
+        zh.put("subscribe.confirm.body", "您将激活该国家的 eSIM 套餐。");
+        zh.put("subscribe.loading.title", "订阅");
+        zh.put("subscribe.loading.header", "订阅处理中...");
+        zh.put("subscribe.success.unparsed", "订阅成功（响应无法解析）。");
+        zh.put("subscribe.success", "订阅成功");
+        zh.put("activation.title", "eSIM 激活");
+        zh.put("activation.inProgress", "激活中...");
+        zh.put("activation.fetchingQr", "激活完成。正在获取 QR...");
+        zh.put("activation.qr.missing", "激活完成，但无法获取 QR。");
+        zh.put("activation.fail", "eSIM 激活失败。");
+        zh.put("activation.retry", "激活仍在进行中。请稍后重试。");
+        zh.put("activation.success", "激活成功");
+        zh.put("success.title", "您的 eSIM 已准备就绪");
+        zh.put("success.subtitle", "扫描 QR 码以安装 eSIM。");
+        zh.put("success.copy", "复制 LPA 代码");
+        zh.put("success.download", "下载二维码");
+        zh.put("success.download.done", "二维码已下载。");
+        zh.put("errors.qr.download", "二维码下载失败。");
+        zh.put("success.next", "然后在 iPhone/Android 上开启移动数据。");
+        zh.put("clipboard.copied", "LPA 代码已复制。");
+
+        dict.put("fr", fr);
+        dict.put("en", en);
+        dict.put("de", de);
+        dict.put("es", es);
+        dict.put("zh", zh);
+        return dict;
+    }
+
+    private String t(String key) {
+        Map<String, String> lang = i18n.getOrDefault(currentLang, i18n.get("fr"));
+        if (lang == null) {
+            return key;
+        }
+        return lang.getOrDefault(key, key);
     }
 
     public static void main(String[] args) { launch(); }
 }
+
+
+
