@@ -2054,6 +2054,8 @@ public class App extends Application {
                         String body = response.body() == null ? "" : response.body();
                         if (response.statusCode() == 409) {
                             showAlert(t("alert.error"), t("errors.conflict"));
+                        } else if (response.statusCode() == 400 && isSimNotReadyForActivation(body)) {
+                            showRetryActivationPrompt(productId, amount, currency, displayName);
                         } else if (response.statusCode() == 400 && isSubscriberTerminated(body)) {
                             showAlert(t("alert.error"), t("errors.subscriber.terminated"));
                         } else if (response.statusCode() == 400 && (isSubscriberSuspended(body) || isSubscriberNotEligible(body))) {
@@ -2076,6 +2078,26 @@ public class App extends Application {
 
     private boolean isSubscriberNotEligible(String body) {
         return body != null && body.contains("SUBSCRIBER_STATUS_NOT_ELIGIBLE");
+    }
+
+    private boolean isSimNotReadyForActivation(String body) {
+        return body != null && body.toLowerCase().contains("not ready for activation");
+    }
+
+    private void showRetryActivationPrompt(String productId, double amount, String currency, String displayName) {
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle(t("alert.error"));
+        alert.setHeaderText(null);
+        alert.setContentText(t("errors.sim.notReady"));
+        ButtonType retryBtn = new ButtonType(t("action.retry"), ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn = new ButtonType(t("reactivate.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(retryBtn, cancelBtn);
+        applyDialogTheme(alert.getDialogPane());
+        alert.showAndWait().ifPresent(result -> {
+            if (result == retryBtn) {
+                subscribeProduct(productId, amount, currency, displayName);
+            }
+        });
     }
 
     private boolean isSubscriberSuspended(String body) {
@@ -2618,6 +2640,7 @@ public class App extends Application {
         fr.put("alert.error", "Erreur");
         fr.put("alert.success", "Succès");
         fr.put("alert.copied", "Copié");
+        fr.put("action.retry", "Réessayer");
         fr.put("errors.product.invalid", "Produit invalide.");
         fr.put("errors.userId.required", "AKUUNDA_USER_ID est requis pour la souscription.");
         fr.put("subscribe.confirm.title", "Souscription eSIM");
@@ -2737,6 +2760,7 @@ public class App extends Application {
         fr.put("balance.renew", "Renouveler le forfait");
         fr.put("errors.msisdn.required", "Aucune eSIM associée à ce compte. Souscrivez pour en obtenir une.");
         fr.put("errors.subscriber.terminated", "eSIM résiliée : vous ne pouvez plus souscrire.");
+        fr.put("errors.sim.notReady", "Votre eSIM n’est pas encore prête. Réessayez dans quelques minutes.");
         fr.put("errors.renew.amount", "Montant du dernier forfait inconnu. Souscrivez d'abord à un forfait.");
         fr.put("renew.confirm.title", "Renouvellement");
         fr.put("renew.confirm.header", "Confirmer le renouvellement ?");
@@ -2784,6 +2808,7 @@ public class App extends Application {
         en.put("alert.error", "Error");
         en.put("alert.success", "Success");
         en.put("alert.copied", "Copied");
+        en.put("action.retry", "Retry");
         en.put("errors.product.invalid", "Invalid product.");
         en.put("errors.userId.required", "AKUUNDA_USER_ID is required to subscribe.");
         en.put("errors.conflict", "A subscription is already pending for this SIM. Please try again in a few minutes.");
@@ -2904,6 +2929,7 @@ public class App extends Application {
         en.put("balance.renew", "Renew plan");
         en.put("errors.msisdn.required", "No eSIM linked to this account. Subscribe to get one.");
         en.put("errors.subscriber.terminated", "eSIM terminated: you can no longer subscribe.");
+        en.put("errors.sim.notReady", "Your eSIM is not ready yet. Please try again in a few minutes.");
         en.put("errors.renew.amount", "Last plan amount unknown. Subscribe to a plan first.");
         en.put("renew.confirm.title", "Renewal");
         en.put("renew.confirm.header", "Confirm renewal?");
@@ -2951,6 +2977,7 @@ public class App extends Application {
         de.put("alert.error", "Fehler");
         de.put("alert.success", "Erfolg");
         de.put("alert.copied", "Kopiert");
+        de.put("action.retry", "Erneut versuchen");
         de.put("errors.product.invalid", "Ungültiges Produkt.");
         de.put("errors.userId.required", "AKUUNDA_USER_ID ist für die Buchung erforderlich.");
         de.put("errors.conflict", "Eine Anfrage ist bereits für diese SIM ausstehend. Bitte in ein paar Minuten erneut versuchen.");
@@ -3071,6 +3098,7 @@ public class App extends Application {
         de.put("balance.renew", "Tarif erneuern");
         de.put("errors.msisdn.required", "Keine eSIM mit diesem Konto verbunden. Bitte einen Tarif buchen.");
         de.put("errors.subscriber.terminated", "eSIM beendet: Keine neue Buchung moglich.");
+        de.put("errors.sim.notReady", "Deine eSIM ist noch nicht bereit. Bitte in ein paar Minuten erneut versuchen.");
         de.put("errors.renew.amount", "Letzter Betrag unbekannt. Zuerst einen Tarif buchen.");
         de.put("renew.confirm.title", "Verlangerung");
         de.put("renew.confirm.header", "Verlangerung bestatigen?");
@@ -3118,6 +3146,7 @@ public class App extends Application {
         es.put("alert.error", "Error");
         es.put("alert.success", "Éxito");
         es.put("alert.copied", "Copiado");
+        es.put("action.retry", "Reintentar");
         es.put("errors.product.invalid", "Producto inválido.");
         es.put("errors.userId.required", "AKUUNDA_USER_ID es necesario para la suscripción.");
         es.put("errors.conflict", "Ya hay una suscripción pendiente para esta SIM. Inténtalo de nuevo en unos minutos.");
@@ -3238,6 +3267,7 @@ public class App extends Application {
         es.put("balance.renew", "Renovar plan");
         es.put("errors.msisdn.required", "No hay eSIM asociada a esta cuenta. Suscribete para obtener una.");
         es.put("errors.subscriber.terminated", "eSIM finalizada: ya no puedes suscribirte.");
+        es.put("errors.sim.notReady", "Tu eSIM aún no está lista. Inténtalo de nuevo en unos minutos.");
         es.put("errors.renew.amount", "Importe del ultimo plan desconocido. Suscribete primero.");
         es.put("renew.confirm.title", "Renovacion");
         es.put("renew.confirm.header", "¿Confirmar renovacion?");
@@ -3285,6 +3315,7 @@ public class App extends Application {
         zh.put("alert.error", "错误");
         zh.put("alert.success", "成功");
         zh.put("alert.copied", "已复制");
+        zh.put("action.retry", "重试");
         zh.put("errors.product.invalid", "产品无效。");
         zh.put("errors.userId.required", "需要 AKUUNDA_USER_ID 才能订阅。");
         zh.put("errors.conflict", "该 SIM 已有待处理的订阅，请稍后再试。");
@@ -3405,6 +3436,7 @@ public class App extends Application {
         zh.put("balance.renew", "续订套餐");
         zh.put("errors.msisdn.required", "该账户暂无 eSIM，请先订购套餐。");
         zh.put("errors.subscriber.terminated", "eSIM 已注销：无法再次订阅。");
+        zh.put("errors.sim.notReady", "eSIM 尚未就绪，请稍后再试。");
         zh.put("errors.renew.amount", "上次套餐金额未知，请先订购套餐。");
         zh.put("renew.confirm.title", "续订");
         zh.put("renew.confirm.header", "确认续订？");
