@@ -51,7 +51,7 @@
 
 .greeting-label {
     -fx-font-size: 12px;
-    -fx-text-fill: #6A527F;
+    -fx-text-fill: #4B2B67;
     -fx-font-weight: 600;
 }
 
@@ -161,7 +161,7 @@
     -fx-padding: 7 16 7 12;
     -fx-background-radius: 16;
     -fx-border-radius: 16;
-    -fx-border-color: #E6D5F0;
+    -fx-border-color: #D9C3F1;
     -fx-border-width: 1;
     -fx-effect: dropshadow(gaussian, rgba(59, 13, 94, 0.18), 8, 0.15, 0, 2);
 }
@@ -433,7 +433,7 @@
 
 .page-subtitle-dark {
     -fx-font-size: 13px;
-    -fx-text-fill: #5F4C70;
+    -fx-text-fill: #4E3A63;
 }
 
 .top-bar {
@@ -448,10 +448,10 @@
 }
 
 .top-bar-button {
-    -fx-background-color: rgba(255,255,255,0.2);
+    -fx-background-color: rgba(255,255,255,0.18);
     -fx-text-fill: #FFFFFF;
     -fx-background-radius: 18;
-    -fx-border-color: rgba(255,255,255,0.35);
+    -fx-border-color: rgba(255,255,255,0.55);
     -fx-border-radius: 18;
 }
 
@@ -471,5 +471,136 @@
     -fx-text-fill: #7A4A00;
     -fx-background-radius: 12;
     -fx-padding: 10 12;
+    -fx-font-size: 12px;
+}
+
+.balance-card {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #FCE8D6;
+    -fx-border-radius: 18;
+    -fx-background-radius: 18;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.12), 10, 0.1, 0, 2);
+}
+
+.balance-card-title {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #2E1342;
+}
+
+.balance-amount {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 26px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #3B0D5E;
+}
+
+.balance-meta {
+    -fx-font-size: 12px;
+    -fx-text-fill: #5F4C70;
+}
+
+.balance-status {
+    -fx-font-size: 11px;
+    -fx-text-fill: #2F7D32;
+    -fx-background-color: #E8F5E9;
+    -fx-background-radius: 12;
+    -fx-padding: 4 10;
+}
+
+.info-block {
+    -fx-background-color: #FDEBD9;
+    -fx-background-radius: 12;
+    -fx-padding: 10 12;
+}
+
+.info-block-text {
+    -fx-font-size: 12px;
+    -fx-text-fill: #7A4A00;
+}
+
+.status-hint {
+    -fx-font-size: 12px;
+    -fx-text-fill: #5A3A7A;
+}
+
+.bottom-nav {
+    -fx-padding: 10 6 6 6;
+    -fx-background-color: #FFFFFF;
+    -fx-background-radius: 18;
+    -fx-border-color: #E5D8F5;
+    -fx-border-radius: 18;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.12), 8, 0.12, 0, 2);
+}
+
+.bottom-nav-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #5F4C70;
+    -fx-font-weight: 600;
+    -fx-padding: 6 10;
+    -fx-background-radius: 12;
+}
+
+.bottom-nav-button-active {
+    -fx-background-color: #FAD9B8;
+    -fx-text-fill: #3B0D5E;
+    -fx-font-weight: 700;
+}
+
+.active-card {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #F0C9A5;
+    -fx-border-radius: 18;
+    -fx-background-radius: 18;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.12), 10, 0.12, 0, 2);
+}
+
+.active-title {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #2E1342;
+}
+
+.active-status {
+    -fx-font-size: 12px;
+    -fx-text-fill: #5F4C70;
+}
+
+.active-meta {
+    -fx-font-size: 11px;
+    -fx-text-fill: #8A7B98;
+}
+
+.active-price {
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #F88809;
+}
+
+.success-card {
+    -fx-background-color: #FFFFFF;
+    -fx-border-color: #E5D8F5;
+    -fx-border-radius: 18;
+    -fx-background-radius: 18;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.14), 10, 0.1, 0, 2);
+}
+
+.success-plan-name {
+    -fx-font-family: "Montserrat", "Nunito", "System";
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #2E1342;
+}
+
+.success-price {
+    -fx-font-size: 16px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #F88809;
+}
+
+.success-meta {
+    -fx-text-fill: #5F4C70;
     -fx-font-size: 12px;
 }

@@ -53,9 +53,28 @@ public class App extends Application {
             BACKEND_BASE_URL + "/esim/transactions");
     private final String BACKEND_ESIM_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_ESIM_URL",
             BACKEND_BASE_URL + "/esim");
+    private final String BACKEND_INVENTORY_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_INVENTORY_URL",
+            BACKEND_BASE_URL + "/esim/inventory");
+    private final String BACKEND_CREDIT_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_CREDIT_URL",
+            BACKEND_BASE_URL + "/esim/internet-balance");
+    private final String BACKEND_TERMINATE_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_TERMINATE_URL",
+            BACKEND_BASE_URL + "/esim/terminate");
+    private final String BACKEND_SUSPEND_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_SUSPEND_URL",
+            BACKEND_BASE_URL + "/esim/suspend");
+    private final String BACKEND_REACTIVATE_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_REACTIVATE_URL",
+            BACKEND_BASE_URL + "/esim/reactivate");
+    private final String BACKEND_RENEW_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_RENEW_URL",
+            BACKEND_BASE_URL + "/esim/renew");
+    private final String BACKEND_RENEW_PRODUCT_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_RENEW_PRODUCT_URL",
+            BACKEND_BASE_URL + "/esim/renew-product");
+    private final String BACKEND_CATALOG_PRODUCT_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_CATALOG_PRODUCT_URL",
+            BACKEND_BASE_URL + "/esim/catalog");
+    private final String BACKEND_MSISDN_URL = System.getenv().getOrDefault("AKUUNDA_BACKEND_MSISDN_URL",
+            BACKEND_BASE_URL + "/esim/msisdn");
     private final String REALM_NAME = System.getenv().getOrDefault("AKUUNDA_REALM_NAME", "akuunda-realm");
     private final String BACKEND_TOKEN = System.getenv("AKUUNDA_BACKEND_TOKEN");
     private final String BACKEND_USER_ID = System.getenv("AKUUNDA_USER_ID");
+    private final String BACKEND_MSISDN = System.getenv("AKUUNDA_MSISDN");
     
     private VBox mainContainer;
     private Stage primaryStage;
@@ -76,6 +95,12 @@ public class App extends Application {
     private boolean isPlansPage = false;
     private String lastPlansCountryName = null;
     private String lastPlansCountryIso3 = null;
+    private Double lastSubscribedAmount = null;
+    private String lastSubscribedProductName = null;
+    private String lastSubscribedCurrency = null;
+    private String cachedMsisdn = null;
+    private String cachedSimSerial = null;
+    private String cachedSimStatus = null;
     private final Map<String, Map<String, String>> i18n = buildI18n();
     private final Map<String, String> langLabels = Map.of(
             "fr", "Francais",
@@ -116,29 +141,6 @@ public class App extends Application {
             primaryStage.setTitle(t("esim.intro.header"));
         }
 
-        HBox topBar = new HBox();
-        topBar.getStyleClass().add("top-bar");
-        topBar.setAlignment(Pos.CENTER_LEFT);
-
-        Button backBtn = new Button("←");
-        backBtn.getStyleClass().add("top-bar-button");
-        backBtn.setDisable(true);
-
-        Label topTitle = new Label(t("esim.intro.header"));
-        topTitle.getStyleClass().add("top-bar-title");
-
-        Region leftSpacer = new Region();
-        HBox.setHgrow(leftSpacer, Priority.ALWAYS);
-
-        Button settingsBtn = new Button("⚙");
-        settingsBtn.getStyleClass().add("top-bar-button");
-        settingsBtn.setDisable(true);
-
-                Region rightSpacer = new Region();
-        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
-
-        topBar.getChildren().addAll(backBtn, leftSpacer, topTitle, rightSpacer, settingsBtn);
-
         Label title = new Label(t("esim.intro.title"));
         title.getStyleClass().add("page-title-dark");
         Label subtitle = new Label(t("esim.intro.subtitle"));
@@ -152,7 +154,7 @@ public class App extends Application {
         info.getStyleClass().add("info-banner");
         info.setWrapText(true);
 
-        mainContainer.getChildren().addAll(topBar, title, subtitle, card, info);
+        mainContainer.getChildren().addAll(title, subtitle, card, info);
     }
 
 
@@ -202,7 +204,8 @@ public class App extends Application {
         
         nextBtn.setOnAction(e -> showPlansPage(selectedCountryName, selectedCountryIso3));
 
-        mainContainer.getChildren().addAll(header, backBtn, title, subtitle, greeting, searchField, scopeTabs, scrollPane, nextBtn);
+        HBox bottomNav = buildBottomNav("plans");
+        mainContainer.getChildren().addAll(header, backBtn, title, subtitle, greeting, searchField, scopeTabs, scrollPane, nextBtn, bottomNav);
         isPlansPage = false;
         if (nextBtn != null) {
             nextBtn.setDisable(selectedCountryIso3 == null || selectedCountryIso3.isBlank());
@@ -240,7 +243,8 @@ public class App extends Application {
 
         ProgressIndicator loader = new ProgressIndicator();
         loader.getStyleClass().add("loader");
-        mainContainer.getChildren().addAll(backBtn, title, subtitle, loader, scrollPane);
+        HBox bottomNav = buildBottomNav("plans");
+        mainContainer.getChildren().addAll(backBtn, title, subtitle, loader, scrollPane, bottomNav);
 
         new Thread(() -> {
             try {
@@ -317,6 +321,517 @@ public class App extends Application {
         }).start();
     }
 
+    // --- ÉCRAN 3 : SOLDE INTERNET + RENOUVELLEMENT ---
+    private void buildInternetBalanceScreen() {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = false;
+
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("balance.title"));
+        }
+
+        HBox topBar = new HBox();
+        topBar.getStyleClass().add("top-bar");
+        topBar.setAlignment(Pos.CENTER_LEFT);
+
+        Button backBtn = new Button("←");
+        backBtn.getStyleClass().add("top-bar-button");
+        backBtn.setOnAction(e -> buildMainSelectionScreen());
+
+        Label topTitle = new Label(t("balance.header"));
+        topTitle.getStyleClass().add("top-bar-title");
+
+        Region leftSpacer = new Region();
+        HBox.setHgrow(leftSpacer, Priority.ALWAYS);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        topBar.getChildren().addAll(backBtn, leftSpacer, topTitle, rightSpacer);
+
+        Label title = new Label(t("balance.title"));
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("balance.subtitle"));
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        VBox balanceCard = new VBox(8);
+        balanceCard.getStyleClass().add("balance-card");
+        balanceCard.setPadding(new Insets(16));
+
+        Label balanceLabel = new Label(t("balance.card.title"));
+        balanceLabel.getStyleClass().add("balance-card-title");
+
+        Label statusPill = new Label(t("balance.status.active"));
+        statusPill.getStyleClass().add("balance-status");
+
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        HBox headerRow = new HBox(10, balanceLabel, headerSpacer, statusPill);
+        headerRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label balanceValue = new Label(t("balance.loading"));
+        balanceValue.getStyleClass().add("balance-amount");
+
+        Label balanceMeta = new Label("");
+        balanceMeta.getStyleClass().add("balance-meta");
+
+        Label balanceExpiry = new Label("");
+        balanceExpiry.getStyleClass().add("balance-meta");
+
+        balanceCard.getChildren().addAll(headerRow, balanceValue, balanceMeta, balanceExpiry);
+
+        Button renewBtn = new Button(t("balance.renew"));
+        renewBtn.setMaxWidth(Double.MAX_VALUE);
+        renewBtn.setMinHeight(50);
+        renewBtn.getStyleClass().add("primary-button");
+        renewBtn.setDisable(true);
+        renewBtn.setOnAction(e -> confirmRenew());
+
+        VBox infoBlock = new VBox(6);
+        infoBlock.getStyleClass().add("info-block");
+        Label infoText = new Label(t("balance.info"));
+        infoText.setWrapText(true);
+        infoText.getStyleClass().add("info-block-text");
+        infoBlock.getChildren().add(infoText);
+
+        VBox noEsimCard = buildNoEsimCard();
+        noEsimCard.setVisible(false);
+        noEsimCard.setManaged(false);
+
+        HBox bottomNav = buildBottomNav("balance");
+        mainContainer.getChildren().addAll(topBar, title, subtitle, balanceCard, noEsimCard, renewBtn, infoBlock, bottomNav);
+
+        fetchInternetBalance(balanceValue, balanceMeta, balanceExpiry, renewBtn, balanceCard, noEsimCard, infoBlock);
+    }
+
+    // --- ÉCRAN 4 : FORFAITS ACTIFS ---
+    private void buildActiveSubscriptionsScreen() {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = false;
+
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("active.title"));
+        }
+
+        HBox topBar = new HBox();
+        topBar.getStyleClass().add("top-bar");
+        topBar.setAlignment(Pos.CENTER_LEFT);
+
+        Button backBtn = new Button("←");
+        backBtn.getStyleClass().add("top-bar-button");
+        backBtn.setOnAction(e -> buildEsimIntroScreen());
+
+        Label topTitle = new Label(t("active.header"));
+        topTitle.getStyleClass().add("top-bar-title");
+
+        Region leftSpacer = new Region();
+        HBox.setHgrow(leftSpacer, Priority.ALWAYS);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        topBar.getChildren().addAll(backBtn, leftSpacer, topTitle, rightSpacer);
+
+        Label title = new Label(t("active.title"));
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("active.subtitle"));
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        VBox list = new VBox(12);
+        list.getStyleClass().add("list-container");
+
+        ScrollPane scroll = new ScrollPane(list);
+        scroll.setFitToWidth(true);
+        scroll.getStyleClass().add("transparent-scroll");
+        VBox.setVgrow(scroll, Priority.ALWAYS);
+
+        Label status = new Label(t("active.loading"));
+        status.getStyleClass().add("status-hint");
+
+        Label msisdnLabel = new Label("");
+        msisdnLabel.getStyleClass().add("status-hint");
+
+        Label terminateHint = new Label(t("terminate.hint"));
+        terminateHint.getStyleClass().add("status-hint");
+
+        Button terminateBtn = new Button(t("terminate.cta"));
+        terminateBtn.getStyleClass().add("secondary-button");
+        terminateBtn.setDisable(true);
+        terminateBtn.setOnAction(e -> confirmTerminate());
+
+        Label suspendHint = new Label(t("suspend.hint"));
+        suspendHint.getStyleClass().add("status-hint");
+
+        Button suspendBtn = new Button(t("suspend.cta"));
+        suspendBtn.getStyleClass().add("secondary-button");
+        suspendBtn.setDisable(true);
+        suspendBtn.setOnAction(e -> confirmSuspend());
+
+        Button reactivateBtn = new Button(t("reactivate.cta"));
+        reactivateBtn.getStyleClass().add("secondary-button");
+        reactivateBtn.setVisible(false);
+        reactivateBtn.setManaged(false);
+        reactivateBtn.setOnAction(e -> {
+            String simSerial = ensureSimSerial();
+            if (simSerial != null && !simSerial.isBlank()) {
+                reactivateSubscriber(simSerial, this::buildActiveSubscriptionsScreen);
+            } else {
+                showAlert(t("alert.error"), t("reactivate.missingSim"));
+            }
+        });
+
+        VBox noEsimCard = buildNoEsimCard();
+        noEsimCard.setVisible(false);
+        noEsimCard.setManaged(false);
+
+        HBox bottomNav = buildBottomNav("esims");
+        mainContainer.getChildren().addAll(topBar, title, subtitle, msisdnLabel, status, noEsimCard, scroll,
+                suspendHint, suspendBtn, reactivateBtn, terminateHint, terminateBtn, bottomNav);
+
+        fetchActiveSubscriptions(list, status, msisdnLabel, suspendBtn, reactivateBtn, terminateBtn, scroll, noEsimCard);
+    }
+
+    private void fetchActiveSubscriptions(VBox list, Label statusLabel, Label msisdnLabel,
+                                          Button suspendBtn, Button reactivateBtn, Button terminateBtn,
+                                          ScrollPane scroll, VBox noEsimCard) {
+        statusLabel.setText(t("active.loading"));
+        new Thread(() -> {
+            try {
+                String msisdn = ensureMsisdn();
+                if (msisdn == null || msisdn.isBlank()) {
+                    Platform.runLater(() -> {
+                        statusLabel.setText("");
+                        msisdnLabel.setText("");
+                        scroll.setVisible(false);
+                        scroll.setManaged(false);
+                        noEsimCard.setVisible(true);
+                        noEsimCard.setManaged(true);
+                        terminateBtn.setDisable(true);
+                        suspendBtn.setDisable(true);
+                        reactivateBtn.setVisible(false);
+                        reactivateBtn.setManaged(false);
+                    });
+                    return;
+                }
+                String simSerial = ensureSimSerial();
+                String status = ensureSimStatus();
+                Platform.runLater(() -> {
+                    msisdnLabel.setText(t("active.msisdn") + " " + msisdn);
+                    if ("TERMINATED".equalsIgnoreCase(status)) {
+                        statusLabel.setText(t("active.status.terminated"));
+                        scroll.setVisible(false);
+                        scroll.setManaged(false);
+                        noEsimCard.setVisible(true);
+                        noEsimCard.setManaged(true);
+                        terminateBtn.setDisable(true);
+                        suspendBtn.setDisable(true);
+                        reactivateBtn.setVisible(false);
+                        reactivateBtn.setManaged(false);
+                    } else if ("SUSPENDED".equalsIgnoreCase(status)) {
+                        statusLabel.setText(t("active.status.suspended"));
+                        scroll.setVisible(true);
+                        scroll.setManaged(true);
+                        noEsimCard.setVisible(false);
+                        noEsimCard.setManaged(false);
+                        terminateBtn.setDisable(simSerial == null || simSerial.isBlank());
+                        suspendBtn.setDisable(true);
+                        reactivateBtn.setVisible(true);
+                        reactivateBtn.setManaged(true);
+                    } else {
+                        statusLabel.setText(t("active.loading"));
+                        scroll.setVisible(true);
+                        scroll.setManaged(true);
+                        noEsimCard.setVisible(false);
+                        noEsimCard.setManaged(false);
+                        terminateBtn.setDisable(simSerial == null || simSerial.isBlank());
+                        suspendBtn.setDisable(simSerial == null || simSerial.isBlank());
+                        reactivateBtn.setVisible(false);
+                        reactivateBtn.setManaged(false);
+                    }
+                });
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                String url = BACKEND_INVENTORY_URL + "?msisdn=" + msisdn + "&statuses=active,readyForUse&withBalances=true";
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Accept", "application/json")
+                        .GET();
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+                    List<JSONObject> items = parseInventoryItems(response.body());
+                    String finalStatus = status;
+                    Platform.runLater(() -> {
+                        list.getChildren().clear();
+                        if (items.isEmpty()) {
+                            if ("SUSPENDED".equalsIgnoreCase(finalStatus)) {
+                                statusLabel.setText(t("active.status.suspended"));
+                            } else {
+                                statusLabel.setText(t("active.empty"));
+                            }
+                            return;
+                        }
+                        statusLabel.setText(t("active.found") + " " + items.size());
+                        for (JSONObject item : items) {
+                            list.getChildren().add(createActiveSubscriptionCard(item));
+                        }
+                    });
+                    return;
+                }
+                Platform.runLater(() -> statusLabel.setText(t("errors.catalog") + " " + response.statusCode()));
+            } catch (Exception e) {
+                Platform.runLater(() -> statusLabel.setText(formatNetworkError(e)));
+            }
+        }).start();
+    }
+
+    private List<JSONObject> parseInventoryItems(String body) {
+        List<JSONObject> results = new ArrayList<>();
+        if (body == null || body.isBlank()) {
+            return results;
+        }
+        String trimmed = body.trim();
+        if (trimmed.startsWith("[")) {
+            JSONArray array = new JSONArray(trimmed);
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject obj = array.optJSONObject(i);
+                if (obj != null) {
+                    results.add(obj);
+                }
+            }
+            return results;
+        }
+        JSONObject root = new JSONObject(trimmed);
+        JSONArray arr = root.optJSONArray("productSubscriptions");
+        if (arr == null) arr = root.optJSONArray("subscriptions");
+        if (arr == null) arr = root.optJSONArray("items");
+        if (arr == null) arr = root.optJSONArray("data");
+        if (arr == null) arr = root.optJSONArray("content");
+        if (arr == null) {
+            JSONObject single = root.optJSONObject("subscription");
+            if (single != null) {
+                results.add(single);
+            }
+            return results;
+        }
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject obj = arr.optJSONObject(i);
+            if (obj != null) {
+                results.add(obj);
+            }
+        }
+        return results;
+    }
+
+    private VBox createActiveSubscriptionCard(JSONObject item) {
+        VBox card = new VBox(8);
+        card.setPadding(new Insets(14));
+        card.getStyleClass().add("active-card");
+
+        String productId = extractSubscriptionProductId(item);
+        String status = extractSubscriptionStatus(item);
+        String expiration = extractSubscriptionExpiration(item);
+        String balance = extractSubscriptionBalance(item);
+        String title = productId == null || productId.isBlank()
+                ? t("active.unknown")
+                : humanizeProductId(productId);
+
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("active-title");
+
+        Label statusLabel = new Label(status == null || status.isBlank()
+                ? t("active.status.unknown")
+                : t("active.status.label") + " " + status);
+        statusLabel.getStyleClass().add("active-status");
+
+        Label expirationLabel = new Label(expiration == null || expiration.isBlank()
+                ? ""
+                : t("active.expiration") + " " + expiration);
+        expirationLabel.getStyleClass().add("active-meta");
+
+        Label balanceLabel = new Label(balance == null || balance.isBlank()
+                ? t("active.balance.unavailable")
+                : t("active.balance.label") + " " + balance);
+        balanceLabel.getStyleClass().add("active-meta");
+
+        Label priceLabel = new Label(t("active.price.loading"));
+        priceLabel.getStyleClass().add("active-price");
+
+        Button renewBtn = new Button(t("active.renew"));
+        renewBtn.getStyleClass().add("primary-button");
+        renewBtn.setDisable(true);
+
+        if (productId != null && !productId.isBlank()) {
+            fetchProductPrice(productId, (amount, currency) -> {
+                Platform.runLater(() -> {
+                    if (amount < 0) {
+                        priceLabel.setText(t("active.price.unavailable"));
+                        renewBtn.setDisable(true);
+                        return;
+                    }
+                    priceLabel.setText(formatPrice(amount, currency));
+                    renewBtn.setDisable(false);
+                    renewBtn.setOnAction(e -> confirmRenewProduct(productId, amount));
+                });
+            });
+        } else {
+            priceLabel.setText(t("active.price.unavailable"));
+        }
+
+        card.getChildren().addAll(titleLabel, statusLabel, expirationLabel, balanceLabel, priceLabel, renewBtn);
+        return card;
+    }
+
+    private String extractSubscriptionProductId(JSONObject item) {
+        if (item == null) {
+            return "";
+        }
+        String productId = item.optString("productId", "");
+        if (!productId.isBlank()) return productId;
+        productId = item.optString("product_id", "");
+        if (!productId.isBlank()) return productId;
+        JSONObject product = item.optJSONObject("product");
+        if (product != null) {
+            productId = product.optString("productId", "");
+            if (!productId.isBlank()) return productId;
+            productId = product.optString("id", "");
+            if (!productId.isBlank()) return productId;
+        }
+        JSONObject def = item.optJSONObject("productDefinition");
+        if (def != null) {
+            productId = def.optString("productId", "");
+        }
+        return productId;
+    }
+
+    private String extractSubscriptionStatus(JSONObject item) {
+        if (item == null) {
+            return "";
+        }
+        String status = item.optString("status", "");
+        if (!status.isBlank()) return status;
+        status = item.optString("subscriptionStatus", "");
+        if (!status.isBlank()) return status;
+        status = item.optString("state", "");
+        return status;
+    }
+
+    private String extractSubscriptionExpiration(JSONObject item) {
+        if (item == null) {
+            return "";
+        }
+        String expiration = item.optString("expirationDate", "");
+        if (!expiration.isBlank()) return expiration;
+        expiration = item.optString("expiryDate", "");
+        if (!expiration.isBlank()) return expiration;
+        expiration = item.optString("endDate", "");
+        return expiration;
+    }
+
+    private String extractSubscriptionBalance(JSONObject item) {
+        if (item == null) {
+            return "";
+        }
+        JSONArray balances = null;
+        JSONObject balancesObj = item.optJSONObject("balances");
+        if (balancesObj != null) {
+            balances = balancesObj.optJSONArray("balances");
+            if (balances == null) balances = balancesObj.optJSONArray("data");
+            if (balances == null) balances = balancesObj.optJSONArray("items");
+            if (balances == null) balances = balancesObj.optJSONArray("content");
+        }
+        if (balances == null) {
+            balances = item.optJSONArray("balances");
+        }
+        if (balances == null) {
+            return "";
+        }
+        double bestValue = -1;
+        String bestUnit = "";
+        for (int i = 0; i < balances.length(); i++) {
+            JSONObject obj = balances.optJSONObject(i);
+            if (obj == null) continue;
+            double value = obj.optDouble("remainingValue", obj.optDouble("value", obj.optDouble("balance", obj.optDouble("remainingAmount", -1))));
+            if (value < 0) continue;
+            String unit = obj.optString("resourceUnit", obj.optString("unit", obj.optString("balanceUnit", obj.optString("unitOfMeasure", ""))));
+            if (bestValue < 0 || value > bestValue) {
+                bestValue = value;
+                bestUnit = unit;
+            }
+        }
+        if (bestValue < 0) {
+            return "";
+        }
+        return formatDataAmount(bestValue, bestUnit);
+    }
+
+    private String formatDataAmount(double value, String unit) {
+        if (unit == null) {
+            return String.format(Locale.US, "%.0f", value);
+        }
+        String u = unit.trim().toUpperCase(Locale.ROOT);
+        double v = value;
+        if (u.equals("B") || u.equals("BYTE") || u.equals("BYTES")) {
+            v = v / 1024.0;
+            u = "KB";
+        }
+        if (u.equals("KB") || u.equals("KBYTE") || u.equals("KBYTES")) {
+            if (v >= 1024 * 1024) {
+                return String.format(Locale.US, "%.1f GB", v / (1024.0 * 1024.0));
+            }
+            if (v >= 1024) {
+                return String.format(Locale.US, "%.1f MB", v / 1024.0);
+            }
+            return String.format(Locale.US, "%.0f KB", v);
+        }
+        if (u.equals("MB") || u.equals("MBYTES")) {
+            if (v >= 1024) {
+                return String.format(Locale.US, "%.1f GB", v / 1024.0);
+            }
+            return String.format(Locale.US, "%.1f MB", v);
+        }
+        if (u.equals("GB") || u.equals("GBYTES")) {
+            return String.format(Locale.US, "%.1f GB", v);
+        }
+        if (u.isBlank()) {
+            return String.format(Locale.US, "%.0f", v);
+        }
+        return String.format(Locale.US, "%.0f %s", v, unit.trim());
+    }
+
+    private void fetchProductPrice(String productId, java.util.function.BiConsumer<Double, String> consumer) {
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                String url = BACKEND_CATALOG_PRODUCT_URL + "/" + productId;
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Accept", "application/json")
+                        .GET();
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+                    JSONObject obj = new JSONObject(response.body());
+                    JSONObject product = obj.has("productDefinition") ? obj : obj.optJSONObject("product");
+                    if (product == null) {
+                        product = obj;
+                    }
+                    double amount = extractAmount(product);
+                    String currency = extractCurrency(product);
+                    consumer.accept(amount, currency);
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+            consumer.accept(-1.0, "");
+        }).start();
+    }
+
     private HBox buildHeader() {
         HBox header = new HBox(12);
         header.setAlignment(Pos.CENTER_LEFT);
@@ -355,6 +870,45 @@ public class App extends Application {
 
         header.getChildren().addAll(logo, spacer, langSelect);
         return header;
+    }
+
+    private HBox buildBottomNav(String activeKey) {
+        HBox nav = new HBox(10);
+        nav.setAlignment(Pos.CENTER);
+        nav.getStyleClass().add("bottom-nav");
+
+        Button home = new Button(t("nav.home"));
+        Button plans = new Button(t("nav.plans"));
+        Button balance = new Button(t("nav.balance"));
+        Button esims = new Button(t("nav.esims"));
+
+        home.getStyleClass().add("bottom-nav-button");
+        plans.getStyleClass().add("bottom-nav-button");
+        balance.getStyleClass().add("bottom-nav-button");
+        esims.getStyleClass().add("bottom-nav-button");
+
+        if ("home".equals(activeKey)) {
+            home.getStyleClass().add("bottom-nav-button-active");
+        } else if ("plans".equals(activeKey)) {
+            plans.getStyleClass().add("bottom-nav-button-active");
+        } else if ("balance".equals(activeKey)) {
+            balance.getStyleClass().add("bottom-nav-button-active");
+        } else if ("esims".equals(activeKey)) {
+            esims.getStyleClass().add("bottom-nav-button-active");
+        }
+
+        home.setOnAction(e -> buildEsimIntroScreen());
+        plans.setOnAction(e -> buildMainSelectionScreen());
+        balance.setOnAction(e -> buildInternetBalanceScreen());
+        esims.setOnAction(e -> {
+            cachedMsisdn = null;
+            cachedSimSerial = null;
+            fetchMsisdnFromBackend();
+            buildActiveSubscriptionsScreen();
+        });
+
+        nav.getChildren().addAll(home, plans, balance, esims);
+        return nav;
     }
 
     private String buildGreetingText() {
@@ -523,6 +1077,511 @@ public class App extends Application {
         }
     }
 
+    private void fetchInternetBalance(Label balanceValue, Label balanceMeta, Label balanceExpiry, Button renewBtn, VBox balanceCard, VBox noEsimCard, VBox infoBlock) {
+        new Thread(() -> {
+            try {
+                String msisdn = ensureMsisdn();
+                if (msisdn == null || msisdn.isBlank()) {
+                    Platform.runLater(() -> {
+                        balanceCard.setVisible(false);
+                        balanceCard.setManaged(false);
+                        infoBlock.setVisible(false);
+                        infoBlock.setManaged(false);
+                        noEsimCard.setVisible(true);
+                        noEsimCard.setManaged(true);
+                        renewBtn.setDisable(true);
+                    });
+                    return;
+                }
+                Platform.runLater(() -> {
+                    balanceCard.setVisible(true);
+                    balanceCard.setManaged(true);
+                    infoBlock.setVisible(true);
+                    infoBlock.setManaged(true);
+                    noEsimCard.setVisible(false);
+                    noEsimCard.setManaged(false);
+                });
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_CREDIT_URL + "?msisdn=" + msisdn))
+                        .header("Accept", "application/json")
+                        .GET();
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+                    JSONObject body = new JSONObject(response.body());
+                    JSONObject credit = body.optJSONObject("credit");
+                    if (credit != null) {
+                        String currency = credit.optString("currency", "");
+                        String unit = credit.optString("unit", "");
+                        double amount = credit.optDouble("amount", -1);
+                        String expiration = credit.optString("expirationDate", "");
+                        String formatted = formatCreditAmount(amount, unit, currency);
+                        Platform.runLater(() -> {
+                            balanceValue.setText(formatted);
+                            balanceMeta.setText(t("balance.meta.unit") + " " + unit);
+                            if (expiration != null && !expiration.isBlank()) {
+                                balanceExpiry.setText(t("balance.meta.expiration") + " " + expiration);
+                            }
+                            renewBtn.setDisable(false);
+                        });
+                        return;
+                    }
+                }
+                Platform.runLater(() -> {
+                    balanceValue.setText(t("balance.unavailable"));
+                    renewBtn.setDisable(true);
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    balanceValue.setText(t("balance.unavailable"));
+                    renewBtn.setDisable(true);
+                });
+            }
+        }).start();
+    }
+
+    private VBox buildNoEsimCard() {
+        VBox card = new VBox(8);
+        card.getStyleClass().add("balance-card");
+        card.setPadding(new Insets(16));
+
+        Label title = new Label(t("noEsim.title"));
+        title.getStyleClass().add("balance-card-title");
+
+        Label body = new Label(t("noEsim.body"));
+        body.getStyleClass().add("balance-meta");
+        body.setWrapText(true);
+
+        Button cta = new Button(t("noEsim.cta"));
+        cta.getStyleClass().add("primary-button");
+        cta.setOnAction(e -> buildMainSelectionScreen());
+
+        card.getChildren().addAll(title, body, cta);
+        return card;
+    }
+
+    private void confirmRenew() {
+        if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
+            showAlert(t("alert.error"), t("errors.userId.required"));
+            return;
+        }
+        if (lastSubscribedAmount == null || lastSubscribedAmount <= 0) {
+            showAlert(t("alert.error"), t("errors.renew.amount"));
+            return;
+        }
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle(t("renew.confirm.title"));
+        alert.setHeaderText(t("renew.confirm.header"));
+        alert.setContentText(t("renew.confirm.body"));
+        applyDialogTheme(alert.getDialogPane());
+        alert.showAndWait().ifPresent(result -> {
+            if (result == ButtonType.OK) {
+                renewSubscription();
+            }
+        });
+    }
+
+    private void confirmRenewProduct(String productId, double amount) {
+        if (productId == null || productId.isBlank()) {
+            showAlert(t("alert.error"), t("errors.product.invalid"));
+            return;
+        }
+        if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
+            showAlert(t("alert.error"), t("errors.userId.required"));
+            return;
+        }
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle(t("renew.confirm.title"));
+        alert.setHeaderText(t("renew.confirm.header"));
+        alert.setContentText(t("renew.confirm.body"));
+        applyDialogTheme(alert.getDialogPane());
+        alert.showAndWait().ifPresent(result -> {
+            if (result == ButtonType.OK) {
+                renewProduct(productId, amount);
+            }
+        });
+    }
+
+    private void confirmTerminate() {
+        String simSerial = ensureSimSerial();
+        if (simSerial == null || simSerial.isBlank()) {
+            showAlert(t("alert.error"), t("terminate.sim.missing"));
+            return;
+        }
+
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle(t("terminate.title"));
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        applyDialogTheme(dialog.getDialogPane());
+
+        Label header = new Label(t("terminate.header"));
+        header.getStyleClass().add("dialog-title");
+        Label warning = new Label(t("terminate.warning"));
+        warning.setWrapText(true);
+        warning.getStyleClass().add("dialog-subtitle");
+
+        Label simLabel = new Label(t("terminate.sim.label") + " " + simSerial);
+        simLabel.getStyleClass().add("dialog-hint");
+
+        CheckBox confirm = new CheckBox(t("terminate.confirm"));
+        confirm.getStyleClass().add("dialog-checkbox");
+
+        VBox content = new VBox(10, header, warning, simLabel, confirm);
+        content.getStyleClass().add("dialog-content");
+        dialog.getDialogPane().setContent(content);
+
+        Button okButton = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
+        okButton.setText(t("terminate.cta.confirm"));
+        okButton.setDisable(true);
+        confirm.selectedProperty().addListener((obs, oldVal, newVal) -> okButton.setDisable(!newVal));
+
+        dialog.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.OK) {
+                performTerminate(simSerial);
+            }
+        });
+    }
+
+    private void performTerminate(String simSerial) {
+        Dialog<Void> loading = showLoading(t("terminate.loading.title"), t("terminate.loading"));
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                String url = BACKEND_TERMINATE_URL + "/" + simSerial;
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{}"));
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(() -> {
+                    loading.close();
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        cachedMsisdn = null;
+                        cachedSimSerial = null;
+                        cachedSimStatus = "TERMINATED";
+                        showAlert(t("alert.success"), t("terminate.success"));
+                        buildActiveSubscriptionsScreen();
+                    } else if (response.statusCode() == 409) {
+                        showAlert(t("alert.error"), t("errors.conflict"));
+                    } else if (response.statusCode() == 401) {
+                        showAlert(t("alert.error"), t("errors.token"));
+                    } else {
+                        showAlert(t("alert.error"), t("terminate.failed") + " " + response.statusCode());
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    loading.close();
+                    showAlert(t("alert.error"), formatNetworkError(e));
+                });
+            }
+        }).start();
+    }
+
+    private void confirmSuspend() {
+        String simSerial = ensureSimSerial();
+        if (simSerial == null || simSerial.isBlank()) {
+            showAlert(t("alert.error"), t("terminate.sim.missing"));
+            return;
+        }
+
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle(t("suspend.title"));
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        applyDialogTheme(dialog.getDialogPane());
+
+        Label header = new Label(t("suspend.header"));
+        header.getStyleClass().add("dialog-title");
+        Label warning = new Label(t("suspend.warning"));
+        warning.setWrapText(true);
+        warning.getStyleClass().add("dialog-subtitle");
+
+        Label simLabel = new Label(t("terminate.sim.label") + " " + simSerial);
+        simLabel.getStyleClass().add("dialog-hint");
+
+        CheckBox confirm = new CheckBox(t("suspend.confirm"));
+        confirm.getStyleClass().add("dialog-checkbox");
+
+        VBox content = new VBox(10, header, warning, simLabel, confirm);
+        content.getStyleClass().add("dialog-content");
+        dialog.getDialogPane().setContent(content);
+
+        Button okButton = (Button) dialog.getDialogPane().lookupButton(ButtonType.OK);
+        okButton.setText(t("suspend.cta.confirm"));
+        okButton.setDisable(true);
+        confirm.selectedProperty().addListener((obs, oldVal, newVal) -> okButton.setDisable(!newVal));
+
+        dialog.showAndWait().ifPresent(btn -> {
+            if (btn == ButtonType.OK) {
+                performSuspend(simSerial);
+            }
+        });
+    }
+
+    private void performSuspend(String simSerial) {
+        Dialog<Void> loading = showLoading(t("suspend.loading.title"), t("suspend.loading"));
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                String url = BACKEND_SUSPEND_URL + "/" + simSerial;
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{}"));
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(() -> {
+                    loading.close();
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        cachedSimStatus = "SUSPENDED";
+                        showAlert(t("alert.success"), t("suspend.success"));
+                        buildActiveSubscriptionsScreen();
+                    } else if (response.statusCode() == 409) {
+                        showAlert(t("alert.error"), t("errors.conflict"));
+                    } else if (response.statusCode() == 401) {
+                        showAlert(t("alert.error"), t("errors.token"));
+                    } else {
+                        showAlert(t("alert.error"), t("suspend.failed") + " " + response.statusCode());
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    loading.close();
+                    showAlert(t("alert.error"), formatNetworkError(e));
+                });
+            }
+        }).start();
+    }
+
+    private void renewSubscription() {
+        Dialog<Void> loading = new Dialog<>();
+        loading.setTitle(t("renew.loading.title"));
+        loading.getDialogPane().setContent(new ProgressIndicator());
+        loading.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+        loading.setHeaderText(t("renew.loading.header"));
+        applyDialogTheme(loading.getDialogPane());
+        loading.show();
+
+        new Thread(() -> {
+            try {
+                String msisdn = ensureMsisdn();
+                if (msisdn == null || msisdn.isBlank()) {
+                    Platform.runLater(() -> {
+                        loading.close();
+                        showAlert(t("alert.error"), t("errors.msisdn.required"));
+                    });
+                    return;
+                }
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                JSONObject payload = new JSONObject();
+                payload.put("userId", BACKEND_USER_ID);
+                payload.put("msisdn", msisdn);
+                payload.put("amount", lastSubscribedAmount == null ? 0 : lastSubscribedAmount);
+
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_RENEW_URL))
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(() -> {
+                    loading.close();
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        showAlert(t("alert.success"), t("renew.success"));
+                    } else if (response.statusCode() == 409) {
+                        showAlert(t("alert.error"), t("errors.conflict"));
+                    } else if (response.statusCode() == 401) {
+                        showAlert(t("alert.error"), t("errors.token"));
+                    } else {
+                        String body = response.body() == null ? "" : response.body();
+                        showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    loading.close();
+                    showAlert(t("alert.error"), e.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    private void renewProduct(String productId, double amount) {
+        Dialog<Void> loading = new Dialog<>();
+        loading.setTitle(t("renew.loading.title"));
+        loading.getDialogPane().setContent(new ProgressIndicator());
+        loading.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+        loading.setHeaderText(t("renew.loading.header"));
+        applyDialogTheme(loading.getDialogPane());
+        loading.show();
+
+        new Thread(() -> {
+            try {
+                String msisdn = ensureMsisdn();
+                if (msisdn == null || msisdn.isBlank()) {
+                    Platform.runLater(() -> {
+                        loading.close();
+                        showAlert(t("alert.error"), t("errors.msisdn.required"));
+                    });
+                    return;
+                }
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                JSONObject payload = new JSONObject();
+                payload.put("userId", BACKEND_USER_ID);
+                payload.put("productId", productId);
+                payload.put("msisdn", msisdn);
+                payload.put("amount", amount);
+
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_RENEW_PRODUCT_URL))
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(() -> {
+                    loading.close();
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        showAlert(t("alert.success"), t("renew.success"));
+                    } else if (response.statusCode() == 409) {
+                        showAlert(t("alert.error"), t("errors.conflict"));
+                    } else if (response.statusCode() == 401) {
+                        showAlert(t("alert.error"), t("errors.token"));
+                    } else {
+                        String body = response.body() == null ? "" : response.body();
+                        showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    loading.close();
+                    showAlert(t("alert.error"), e.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    private String resolveMsisdn() {
+        if (cachedMsisdn != null && !cachedMsisdn.isBlank()) {
+            return cachedMsisdn;
+        }
+        if (BACKEND_MSISDN != null && !BACKEND_MSISDN.isBlank()) {
+            cachedMsisdn = BACKEND_MSISDN.replaceAll("\\s", "");
+            return cachedMsisdn;
+        }
+        return "";
+    }
+
+    private String resolveSimSerial() {
+        if (cachedSimSerial != null && !cachedSimSerial.isBlank()) {
+            return cachedSimSerial;
+        }
+        return "";
+    }
+
+    private String resolveSimStatus() {
+        if (cachedSimStatus != null && !cachedSimStatus.isBlank()) {
+            return cachedSimStatus;
+        }
+        return "";
+    }
+
+    private String ensureMsisdn() {
+        String msisdn = resolveMsisdn();
+        if (msisdn != null && !msisdn.isBlank()) {
+            return msisdn;
+        }
+        String fetched = fetchMsisdnFromBackend();
+        if (fetched != null && !fetched.isBlank()) {
+            cachedMsisdn = fetched;
+            return fetched;
+        }
+        return "";
+    }
+
+    private String ensureSimSerial() {
+        String simSerial = resolveSimSerial();
+        if (simSerial != null && !simSerial.isBlank()) {
+            return simSerial;
+        }
+        fetchMsisdnFromBackend();
+        return resolveSimSerial();
+    }
+
+    private String ensureSimStatus() {
+        String status = resolveSimStatus();
+        if (status != null && !status.isBlank()) {
+            return status;
+        }
+        fetchMsisdnFromBackend();
+        return resolveSimStatus();
+    }
+
+    private String fetchMsisdnFromBackend() {
+        if (BACKEND_USER_ID == null || BACKEND_USER_ID.isBlank()) {
+            return "";
+        }
+        try {
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            String url = BACKEND_MSISDN_URL + "/" + BACKEND_USER_ID;
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Accept", "application/json")
+                    .GET();
+            if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+            }
+            HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300 && response.body() != null) {
+                JSONObject body = new JSONObject(response.body());
+                String msisdn = body.optString("msisdn", "");
+                String simSerial = body.optString("simSerial", "");
+                String status = body.optString("status", "");
+                if (simSerial != null && !simSerial.isBlank()) {
+                    cachedSimSerial = simSerial.replaceAll("\\s", "");
+                }
+                if (status != null && !status.isBlank()) {
+                    cachedSimStatus = status.trim();
+                }
+                if (msisdn != null && !msisdn.isBlank()) {
+                    return msisdn.replaceAll("\\s", "");
+                }
+            }
+        } catch (Exception ignored) {
+            return "";
+        }
+        return "";
+    }
+
+    private String formatCreditAmount(double amount, String unit, String currency) {
+        if (amount < 0) {
+            return t("balance.unavailable");
+        }
+        double value = amount;
+        if ("CENTS".equalsIgnoreCase(unit)) {
+            value = amount / 100.0;
+        }
+        String symbol = currency == null || currency.isBlank() ? "" : (" " + currency);
+        return String.format("%.2f%s", value, symbol);
+    }
+
     private String humanizeProductId(String productId) {
         String cleaned = productId.replace("_", " ");
         cleaned = cleaned.replace("WW 9010 STACK ONEOFF ", "");
@@ -602,7 +1661,7 @@ public class App extends Application {
         Button b = new Button(t("plan.select"));
         b.setMaxWidth(Double.MAX_VALUE);
         b.getStyleClass().add("primary-button");
-        b.setOnAction(e -> confirmSubscribe(productId, amount));
+        b.setOnAction(e -> confirmSubscribe(productId, amount, currency, name));
 
         card.getChildren().addAll(lbl, metaLabel, priceLabel, b);
         return card;
@@ -870,7 +1929,18 @@ public class App extends Application {
         }
     }
 
-    private void confirmSubscribe(String productId, double amount) {
+    private Dialog<Void> showLoading(String title, String header) {
+        Dialog<Void> loading = new Dialog<>();
+        loading.setTitle(title);
+        loading.getDialogPane().setContent(new ProgressIndicator());
+        loading.getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
+        loading.setHeaderText(header);
+        applyDialogTheme(loading.getDialogPane());
+        loading.show();
+        return loading;
+    }
+
+    private void confirmSubscribe(String productId, double amount, String currency, String displayName) {
         if (productId == null || productId.isBlank()) {
             showAlert(t("alert.error"), t("errors.product.invalid"));
             return;
@@ -880,19 +1950,32 @@ public class App extends Application {
             return;
         }
 
+        String status = ensureSimStatus();
+        if ("TERMINATED".equalsIgnoreCase(status)) {
+            showAlert(t("alert.error"), t("errors.subscriber.terminated"));
+            return;
+        }
+        if ("SUSPENDED".equalsIgnoreCase(status)) {
+            showReactivatePrompt(productId, amount, currency, displayName);
+            return;
+        }
+
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
         alert.setTitle(t("subscribe.confirm.title"));
         alert.setHeaderText(t("subscribe.confirm.header"));
-        alert.setContentText(t("subscribe.confirm.body"));
+        String msisdn = resolveMsisdn();
+        alert.setContentText(msisdn == null || msisdn.isBlank()
+                ? t("subscribe.confirm.body.newsim")
+                : t("subscribe.confirm.body"));
         applyDialogTheme(alert.getDialogPane());
         alert.showAndWait().ifPresent(result -> {
             if (result == ButtonType.OK) {
-                subscribeProduct(productId, amount);
+                subscribeProduct(productId, amount, currency, displayName);
             }
         });
     }
 
-    private void subscribeProduct(String productId, double amount) {
+    private void subscribeProduct(String productId, double amount, String currency, String displayName) {
         Dialog<Void> loading = new Dialog<>();
         loading.setTitle(t("subscribe.loading.title"));
         loading.getDialogPane().setContent(new ProgressIndicator());
@@ -903,11 +1986,18 @@ public class App extends Application {
 
         new Thread(() -> {
             try {
+                String msisdn = resolveMsisdn();
+                if (msisdn == null || msisdn.isBlank()) {
+                    msisdn = fetchMsisdnFromBackend();
+                }
                 HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
                 JSONObject payload = new JSONObject();
                 payload.put("productId", productId);
                 payload.put("userId", BACKEND_USER_ID);
                 payload.put("amount", amount);
+                if (msisdn != null && !msisdn.isBlank()) {
+                    payload.put("msisdn", msisdn);
+                }
 
                 HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                         .uri(URI.create(BACKEND_SUBSCRIBE_URL))
@@ -934,24 +2024,29 @@ public class App extends Application {
                             String qrCodeValue = body.optString("qrCodeValue", "");
                             String qrCodeDataUrl = body.optString("qrCodeDataUrl", "");
 
-                            String message = t("subscribe.success") + "\n" +
-                                    "subscriptionId: " + subscriptionId + "\n" +
-                                    "simSerial: " + serial + "\n" +
-                                    "activationCode: " + activationCode;
-
                             if ((activationCode != null && !activationCode.isBlank())
                                     || (qrCodeValue != null && !qrCodeValue.isBlank())
                                     || (qrCodeDataUrl != null && !qrCodeDataUrl.isBlank())) {
-                                showSuccessWithQr(message, qrCodeValue, qrCodeDataUrl);
+                                cachedMsisdn = null;
+                                cachedSimSerial = null;
+                                fetchMsisdnFromBackend();
+                                buildSubscriptionSuccessScreen(displayName, amount, currency, subscriptionId, serial,
+                                        activationCode, qrCodeValue, qrCodeDataUrl);
                             } else if (activationRequired && transactionId != null && !transactionId.isBlank()) {
+                                cachedMsisdn = null;
+                                cachedSimSerial = null;
+                                fetchMsisdnFromBackend();
                                 showActivationPendingAndPoll(transactionId, serial);
                             } else {
-                                String fallback = message;
-                                if (transactionStatus != null && !transactionStatus.isBlank()) {
-                                    fallback += "\ntransactionStatus: " + transactionStatus;
-                                }
-                                showAlert(t("alert.success"), fallback);
+                                cachedMsisdn = null;
+                                cachedSimSerial = null;
+                                fetchMsisdnFromBackend();
+                                buildSubscriptionSuccessScreen(displayName, amount, currency, subscriptionId, serial,
+                                        activationCode, "", "");
                             }
+                            lastSubscribedAmount = amount;
+                            lastSubscribedProductName = displayName != null && !displayName.isBlank() ? displayName : productId;
+                            lastSubscribedCurrency = currency;
                         } catch (Exception ex) {
                             showAlert(t("alert.success"), t("subscribe.success.unparsed"));
                         }
@@ -959,12 +2054,85 @@ public class App extends Application {
                         String body = response.body() == null ? "" : response.body();
                         if (response.statusCode() == 409) {
                             showAlert(t("alert.error"), t("errors.conflict"));
+                        } else if (response.statusCode() == 400 && isSubscriberTerminated(body)) {
+                            showAlert(t("alert.error"), t("errors.subscriber.terminated"));
+                        } else if (response.statusCode() == 400 && (isSubscriberSuspended(body) || isSubscriberNotEligible(body))) {
+                            showReactivatePrompt(productId, amount, currency, displayName);
                         } else if (response.statusCode() == 401) {
                             showAlert(t("alert.error"), t("errors.token"));
                         } else {
-                            showAlert(t("alert.error"), "HTTP " + response.statusCode() + "
-" + body);
+                            showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
                         }
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    loading.close();
+                    showAlert(t("alert.error"), e.getMessage());
+                });
+            }
+        }).start();
+    }
+
+    private boolean isSubscriberNotEligible(String body) {
+        return body != null && body.contains("SUBSCRIBER_STATUS_NOT_ELIGIBLE");
+    }
+
+    private boolean isSubscriberSuspended(String body) {
+        return body != null && body.contains("SUBSCRIBER_SUSPENDED");
+    }
+
+    private boolean isSubscriberTerminated(String body) {
+        return body != null && body.contains("SUBSCRIBER_TERMINATED");
+    }
+
+    private void showReactivatePrompt(String productId, double amount, String currency, String displayName) {
+        String simSerial = ensureSimSerial();
+        if (simSerial == null || simSerial.isBlank()) {
+            showAlert(t("alert.error"), t("reactivate.missingSim"));
+            return;
+        }
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION);
+        alert.setTitle(t("reactivate.title"));
+        alert.setHeaderText(t("reactivate.header"));
+        alert.setContentText(t("reactivate.body"));
+        ButtonType reactivateBtn = new ButtonType(t("reactivate.action"), ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn = new ButtonType(t("reactivate.cancel"), ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(reactivateBtn, cancelBtn);
+        applyDialogTheme(alert.getDialogPane());
+        alert.showAndWait().ifPresent(result -> {
+            if (result == reactivateBtn) {
+                reactivateSubscriber(simSerial, () -> subscribeProduct(productId, amount, currency, displayName));
+            }
+        });
+    }
+
+    private void reactivateSubscriber(String simSerial, Runnable onSuccess) {
+        Dialog<Void> loading = showLoading(t("reactivate.loading.title"), t("reactivate.loading.header"));
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                JSONObject payload = new JSONObject();
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_REACTIVATE_URL + "/" + simSerial))
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                Platform.runLater(() -> {
+                    loading.close();
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        cachedSimStatus = "USED";
+                        showAlert(t("alert.success"), t("reactivate.success"));
+                        if (onSuccess != null) {
+                            onSuccess.run();
+                        }
+                    } else {
+                        String body = response.body() == null ? "" : response.body();
+                        showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
                     }
                 });
             } catch (Exception e) {
@@ -1021,10 +2189,14 @@ public class App extends Application {
                                     qrValue = qrCode.optString("value", "");
                                     qrDataUrl = qrCode.optString("dataUrl", "");
                                 }
-                                String message = t("activation.success") + "\n" +
-                                        "simSerial: " + simSerial + "\n" +
-                                        "activationCode: " + activationCode;
-                                showSuccessWithQr(message, qrValue, qrDataUrl);
+                                buildSubscriptionSuccessScreen(lastSubscribedProductName,
+                                        lastSubscribedAmount == null ? 0 : lastSubscribedAmount,
+                                        lastSubscribedCurrency,
+                                        "",
+                                        simSerial,
+                                        activationCode,
+                                        qrValue,
+                                        qrDataUrl);
                             } else {
                                 showAlert(t("activation.title"), t("activation.qr.missing"));
                             }
@@ -1135,6 +2307,114 @@ public class App extends Application {
             return String.format("%.2f", amount);
         }
         return String.format("%.2f %s", amount, currency);
+    }
+
+    private void buildSubscriptionSuccessScreen(String productName,
+                                                double amount,
+                                                String currency,
+                                                String subscriptionId,
+                                                String simSerial,
+                                                String activationCode,
+                                                String qrCodeValue,
+                                                String qrCodeDataUrl) {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = false;
+
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("success.title"));
+        }
+
+        HBox topBar = new HBox();
+        topBar.getStyleClass().add("top-bar");
+        topBar.setAlignment(Pos.CENTER_LEFT);
+
+        Button backBtn = new Button("←");
+        backBtn.getStyleClass().add("top-bar-button");
+        backBtn.setOnAction(e -> buildMainSelectionScreen());
+
+        Label topTitle = new Label(t("success.title"));
+        topTitle.getStyleClass().add("top-bar-title");
+
+        Region leftSpacer = new Region();
+        HBox.setHgrow(leftSpacer, Priority.ALWAYS);
+
+        Region rightSpacer = new Region();
+        HBox.setHgrow(rightSpacer, Priority.ALWAYS);
+
+        topBar.getChildren().addAll(backBtn, leftSpacer, topTitle, rightSpacer);
+
+        Label title = new Label(t("success.header"));
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("success.subtitle.long"));
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        VBox card = new VBox(10);
+        card.setPadding(new Insets(16));
+        card.getStyleClass().add("success-card");
+
+        Label planName = new Label(productName == null || productName.isBlank() ? t("success.plan.unknown") : productName);
+        planName.getStyleClass().add("success-plan-name");
+
+        String priceText = amount < 0 ? t("active.price.unavailable") : formatPrice(amount, currency);
+        Label price = new Label(priceText);
+        price.getStyleClass().add("success-price");
+
+        VBox meta = new VBox(4);
+        meta.getStyleClass().add("success-meta");
+        if (subscriptionId != null && !subscriptionId.isBlank()) {
+            meta.getChildren().add(new Label("subscriptionId: " + subscriptionId));
+        }
+        if (simSerial != null && !simSerial.isBlank()) {
+            meta.getChildren().add(new Label("simSerial: " + simSerial));
+        }
+        if (activationCode != null && !activationCode.isBlank()) {
+            meta.getChildren().add(new Label("activationCode: " + activationCode));
+        }
+
+        card.getChildren().addAll(planName, price, meta);
+
+        byte[] qrBytes = decodeQrBytes(qrCodeDataUrl);
+        ImageView qrView = buildQrImageView(qrBytes);
+        VBox qrBox = new VBox(8);
+        qrBox.setAlignment(Pos.CENTER);
+        if (qrView != null) {
+            StackPane qrCard = new StackPane(qrView);
+            qrCard.getStyleClass().add("qr-card");
+            Button download = new Button(t("success.download"));
+            download.getStyleClass().addAll("secondary-button", "qr-download");
+            download.setOnAction(e -> {
+                Window owner = mainContainer.getScene() != null ? mainContainer.getScene().getWindow() : null;
+                saveQrCode(qrBytes, owner);
+            });
+            qrBox.getChildren().addAll(qrCard, download);
+        }
+        if (qrCodeValue != null && !qrCodeValue.isBlank()) {
+            Label lpa = new Label("LPA: " + qrCodeValue);
+            lpa.getStyleClass().add("dialog-lpa");
+            Button copy = new Button(t("success.copy"));
+            copy.getStyleClass().add("secondary-button");
+            copy.setOnAction(e -> copyToClipboard(qrCodeValue));
+            qrBox.getChildren().addAll(lpa, copy);
+        }
+
+        HBox actions = new HBox(12);
+        actions.setAlignment(Pos.CENTER);
+        Button myEsim = new Button(t("success.myEsim"));
+        myEsim.getStyleClass().add("secondary-button");
+        myEsim.setOnAction(e -> {
+            cachedMsisdn = null;
+            cachedSimSerial = null;
+            fetchMsisdnFromBackend();
+            buildActiveSubscriptionsScreen();
+        });
+        Button home = new Button(t("success.home"));
+        home.getStyleClass().add("primary-button");
+        home.setOnAction(e -> buildMainSelectionScreen());
+        actions.getChildren().addAll(myEsim, home);
+
+        HBox bottomNav = buildBottomNav("esims");
+        mainContainer.getChildren().addAll(topBar, title, subtitle, card, qrBox, actions, bottomNav);
     }
 
     private void showSuccessWithQr(String message, String qrCodeValue, String qrCodeDataUrl) {
@@ -1319,6 +2599,10 @@ public class App extends Application {
         fr.put("cta.viewPlans", "Voir les forfaits");
         fr.put("nav.back", "Retour");
         fr.put("nav.menu", "MENU");
+        fr.put("nav.home", "Accueil");
+        fr.put("nav.plans", "Forfaits");
+        fr.put("nav.balance", "Solde");
+        fr.put("nav.esims", "Mes eSIM");
         fr.put("plans.title", "Offres pour");
         fr.put("plans.subtitle", "Forfaits disponibles pour");
         fr.put("plans.none", "Aucun forfait eSIM trouvé pour ce pays.");
@@ -1339,10 +2623,21 @@ public class App extends Application {
         fr.put("subscribe.confirm.title", "Souscription eSIM");
         fr.put("subscribe.confirm.header", "Confirmer la souscription ?");
         fr.put("subscribe.confirm.body", "Vous allez activer un forfait eSIM pour ce pays.");
+        fr.put("subscribe.confirm.body.newsim", "Aucune eSIM n’est encore associée à ce compte. Une nouvelle eSIM sera attribuée après la souscription.");
         fr.put("subscribe.loading.title", "Souscription");
         fr.put("subscribe.loading.header", "Souscription en cours...");
         fr.put("subscribe.success.unparsed", "Souscription OK (réponse non parsable).");
         fr.put("subscribe.success", "Souscription OK");
+        fr.put("reactivate.title", "Réactiver l’eSIM");
+        fr.put("reactivate.header", "Votre eSIM est suspendue");
+        fr.put("reactivate.body", "Souhaitez-vous réactiver votre eSIM pour continuer la souscription ?");
+        fr.put("reactivate.action", "Réactiver");
+        fr.put("reactivate.cta", "Réactiver l’eSIM");
+        fr.put("reactivate.cancel", "Annuler");
+        fr.put("reactivate.loading.title", "Réactivation");
+        fr.put("reactivate.loading.header", "Réactivation en cours...");
+        fr.put("reactivate.success", "eSIM réactivée. Vous pouvez relancer la souscription.");
+        fr.put("reactivate.missingSim", "Aucune eSIM associée à ce compte. Veuillez choisir un forfait pour en obtenir une.");
         fr.put("activation.title", "Activation eSIM");
         fr.put("activation.inProgress", "Activation en cours...");
         fr.put("activation.fetchingQr", "Activation terminée. Récupération du QR...");
@@ -1351,17 +2646,23 @@ public class App extends Application {
         fr.put("activation.retry", "Activation toujours en cours. Réessayez plus tard.");
         fr.put("activation.success", "Activation OK");
         fr.put("success.title", "Votre eSIM est prête");
+        fr.put("success.header", "Souscription réussie");
+        fr.put("success.subtitle.long", "Votre forfait est activé. Scannez le QR pour installer l'eSIM.");
+        fr.put("success.plan.unknown", "Forfait eSIM");
         fr.put("success.subtitle", "Scannez le QR code pour installer l'eSIM.");
         fr.put("success.copy", "Copier le code LPA");
         fr.put("success.download", "Telecharger le QR");
         fr.put("success.download.done", "QR telecharge.");
         fr.put("errors.qr.download", "Echec du telechargement du QR.");
         fr.put("success.next", "Ensuite, activez les donnees mobiles sur votre iPhone/Android.");
+        fr.put("success.myEsim", "Voir mes eSIM");
+        fr.put("success.home", "Retour à l'accueil");
         fr.put("clipboard.copied", "Le code LPA a été copié.");
         fr.put("greeting.default", "Bonjour");
         fr.put("wallet.prefix", "Solde");
         fr.put("wallet.placeholder", "Solde: --");
-        fr.put("wallet.unavailable", "Solde indisponible");        fr.put("home.balance.label", "Votre solde disponible");
+        fr.put("wallet.unavailable", "Solde indisponible");
+        fr.put("home.balance.label", "Votre solde disponible");
         fr.put("home.balance.add", "+ Ajouter de l'argent");
         fr.put("home.action.receive", "Recevoir");
         fr.put("home.action.pay", "Payer");
@@ -1375,7 +2676,74 @@ public class App extends Application {
         fr.put("esim.intro.title", "Bienvenue dans la rubrique eSIM Orange");
         fr.put("esim.intro.subtitle", "En cliquant sur l'option ci-dessous :");
         fr.put("esim.intro.card", "Activer votre eSIM Orange  >");
+        fr.put("esim.intro.myEsim", "Voir mes eSIM");
         fr.put("esim.intro.info", "Service uniquement disponible sur les téléphones compatibles eSim. Des frais de paiement de X € seront appliqués.");
+        fr.put("active.header", "Mes eSIM");
+        fr.put("active.title", "Forfaits actifs");
+        fr.put("active.subtitle", "Consultez vos forfaits actifs et renouvelez-les.");
+        fr.put("active.loading", "Chargement des forfaits actifs...");
+        fr.put("active.empty", "Aucun forfait actif pour le moment.");
+        fr.put("active.found", "Forfaits actifs :");
+        fr.put("active.price.loading", "Prix en cours...");
+        fr.put("active.price.unavailable", "Prix indisponible");
+        fr.put("active.balance.label", "Solde restant :");
+        fr.put("active.balance.unavailable", "Solde indisponible");
+        fr.put("active.renew", "Renouveler");
+        fr.put("active.status.unknown", "Statut inconnu");
+        fr.put("active.status.label", "Statut :");
+        fr.put("active.status.suspended", "Votre eSIM est suspendue. Réactivez-la pour reprendre.");
+        fr.put("active.status.terminated", "eSIM résiliée. Vous ne pouvez plus souscrire.");
+        fr.put("active.expiration", "Expiration :");
+        fr.put("active.msisdn", "Ma SIM :");
+        fr.put("active.unknown", "Forfait eSIM");
+        fr.put("noEsim.title", "Vous n'avez pas encore d'eSIM");
+        fr.put("noEsim.body", "Choisissez un forfait pour créer et activer votre eSIM.");
+        fr.put("noEsim.cta", "Voir les forfaits");
+        fr.put("suspend.hint", "Suspendre temporairement l’eSIM (réactivation possible).");
+        fr.put("suspend.cta", "Suspendre l’eSIM");
+        fr.put("suspend.title", "Suspension eSIM");
+        fr.put("suspend.header", "Suspendre cette eSIM ?");
+        fr.put("suspend.warning", "La SIM sera suspendue temporairement. Vous pourrez la réactiver plus tard.");
+        fr.put("suspend.confirm", "Je comprends et je souhaite suspendre.");
+        fr.put("suspend.cta.confirm", "Suspendre");
+        fr.put("suspend.loading.title", "Suspension");
+        fr.put("suspend.loading", "Suspension en cours...");
+        fr.put("suspend.success", "Suspension acceptée.");
+        fr.put("suspend.failed", "Suspension impossible.");
+        fr.put("terminate.hint", "Supprimer l'eSIM pour ce compte (résiliation définitive).");
+        fr.put("terminate.cta", "Supprimer l'eSIM");
+        fr.put("terminate.title", "Résiliation eSIM");
+        fr.put("terminate.header", "Supprimer cette eSIM ?");
+        fr.put("terminate.warning", "Cette action résilie l'abonné. La SIM ne pourra plus accéder au réseau.");
+        fr.put("terminate.confirm", "Je comprends et je souhaite résilier.");
+        fr.put("terminate.sim.label", "SIM :");
+        fr.put("terminate.sim.missing", "SIM inconnue.");
+        fr.put("terminate.cta.confirm", "Résilier");
+        fr.put("terminate.loading.title", "Résiliation");
+        fr.put("terminate.loading", "Résiliation en cours...");
+        fr.put("terminate.success", "Résiliation acceptée.");
+        fr.put("terminate.failed", "Résiliation impossible.");
+        fr.put("balance.cta", "Solde internet");
+        fr.put("balance.header", "Solde internet");
+        fr.put("balance.title", "Solde internet");
+        fr.put("balance.subtitle", "Consultez votre crédit et renouvelez votre forfait.");
+        fr.put("balance.card.title", "Votre solde Internet");
+        fr.put("balance.status.active", "Actif");
+        fr.put("balance.loading", "Chargement...");
+        fr.put("balance.meta.unit", "Unité:");
+        fr.put("balance.meta.expiration", "Expiration:");
+        fr.put("balance.unavailable", "Solde indisponible");
+        fr.put("balance.info", "Lorsque votre solde atteint 0, vous pouvez renouveler le forfait depuis cette page.");
+        fr.put("balance.renew", "Renouveler le forfait");
+        fr.put("errors.msisdn.required", "Aucune eSIM associée à ce compte. Souscrivez pour en obtenir une.");
+        fr.put("errors.subscriber.terminated", "eSIM résiliée : vous ne pouvez plus souscrire.");
+        fr.put("errors.renew.amount", "Montant du dernier forfait inconnu. Souscrivez d'abord à un forfait.");
+        fr.put("renew.confirm.title", "Renouvellement");
+        fr.put("renew.confirm.header", "Confirmer le renouvellement ?");
+        fr.put("renew.confirm.body", "Vous allez renouveler votre dernier forfait.");
+        fr.put("renew.loading.title", "Renouvellement");
+        fr.put("renew.loading.header", "Renouvellement en cours...");
+        fr.put("renew.success", "Renouvellement OK");
 
 
         Map<String, String> en = new HashMap<>();
@@ -1398,6 +2766,10 @@ public class App extends Application {
         en.put("cta.viewPlans", "View plans");
         en.put("nav.back", "Back");
         en.put("nav.menu", "MENU");
+        en.put("nav.home", "Home");
+        en.put("nav.plans", "Plans");
+        en.put("nav.balance", "Balance");
+        en.put("nav.esims", "My eSIMs");
         en.put("plans.title", "Plans for");
         en.put("plans.subtitle", "Available plans for");
         en.put("plans.none", "No eSIM plans found for this country.");
@@ -1418,10 +2790,21 @@ public class App extends Application {
         en.put("subscribe.confirm.title", "eSIM subscription");
         en.put("subscribe.confirm.header", "Confirm subscription?");
         en.put("subscribe.confirm.body", "You are about to activate an eSIM plan for this country.");
+        en.put("subscribe.confirm.body.newsim", "No eSIM is associated with this account yet. A new eSIM will be assigned after subscription.");
         en.put("subscribe.loading.title", "Subscription");
         en.put("subscribe.loading.header", "Subscription in progress...");
         en.put("subscribe.success.unparsed", "Subscription OK (unparsable response).");
         en.put("subscribe.success", "Subscription OK");
+        en.put("reactivate.title", "Reactivate eSIM");
+        en.put("reactivate.header", "Your eSIM is suspended");
+        en.put("reactivate.body", "Do you want to reactivate your eSIM to continue the subscription?");
+        en.put("reactivate.action", "Reactivate");
+        en.put("reactivate.cta", "Reactivate eSIM");
+        en.put("reactivate.cancel", "Cancel");
+        en.put("reactivate.loading.title", "Reactivation");
+        en.put("reactivate.loading.header", "Reactivation in progress...");
+        en.put("reactivate.success", "eSIM reactivated. You can retry the subscription.");
+        en.put("reactivate.missingSim", "No eSIM associated with this account. Please choose a plan to get one.");
         en.put("activation.title", "eSIM activation");
         en.put("activation.inProgress", "Activation in progress...");
         en.put("activation.fetchingQr", "Activation complete. Fetching QR...");
@@ -1430,17 +2813,23 @@ public class App extends Application {
         en.put("activation.retry", "Activation still in progress. Please try again later.");
         en.put("activation.success", "Activation OK");
         en.put("success.title", "Your eSIM is ready");
+        en.put("success.header", "Subscription successful");
+        en.put("success.subtitle.long", "Your plan is active. Scan the QR to install the eSIM.");
+        en.put("success.plan.unknown", "eSIM plan");
         en.put("success.subtitle", "Scan the QR code to install the eSIM.");
         en.put("success.copy", "Copy LPA code");
         en.put("success.download", "Download QR");
         en.put("success.download.done", "QR downloaded.");
         en.put("errors.qr.download", "Failed to download QR.");
         en.put("success.next", "Then enable cellular data on your iPhone/Android.");
+        en.put("success.myEsim", "My eSIMs");
+        en.put("success.home", "Back to home");
         en.put("clipboard.copied", "The LPA code has been copied.");
         en.put("greeting.default", "Hello");
         en.put("wallet.prefix", "Balance");
         en.put("wallet.placeholder", "Balance: --");
-        en.put("wallet.unavailable", "Balance unavailable");        en.put("home.balance.label", "Available balance");
+        en.put("wallet.unavailable", "Balance unavailable");
+        en.put("home.balance.label", "Available balance");
         en.put("home.balance.add", "+ Add money");
         en.put("home.action.receive", "Receive");
         en.put("home.action.pay", "Pay");
@@ -1454,7 +2843,74 @@ public class App extends Application {
         en.put("esim.intro.title", "Welcome to the Orange eSIM section");
         en.put("esim.intro.subtitle", "Click the option below:");
         en.put("esim.intro.card", "Activate your Orange eSIM  >");
+        en.put("esim.intro.myEsim", "My eSIMs");
         en.put("esim.intro.info", "Service only available on eSIM compatible phones. Payment fees of X € will apply.");
+        en.put("active.header", "My eSIMs");
+        en.put("active.title", "Active plans");
+        en.put("active.subtitle", "Check your active plans and renew them.");
+        en.put("active.loading", "Loading active plans...");
+        en.put("active.empty", "No active plan for now.");
+        en.put("active.found", "Active plans:");
+        en.put("active.price.loading", "Loading price...");
+        en.put("active.price.unavailable", "Price unavailable");
+        en.put("active.balance.label", "Remaining balance:");
+        en.put("active.balance.unavailable", "Balance unavailable");
+        en.put("active.renew", "Renew");
+        en.put("active.status.unknown", "Unknown status");
+        en.put("active.status.label", "Status:");
+        en.put("active.status.suspended", "Your eSIM is suspended. Reactivate it to continue.");
+        en.put("active.status.terminated", "eSIM terminated. You can no longer subscribe.");
+        en.put("active.expiration", "Expiration:");
+        en.put("active.msisdn", "My SIM:");
+        en.put("active.unknown", "eSIM plan");
+        en.put("noEsim.title", "You don't have an eSIM yet");
+        en.put("noEsim.body", "Choose a plan to create and activate your eSIM.");
+        en.put("noEsim.cta", "View plans");
+        en.put("suspend.hint", "Temporarily suspend the eSIM (reactivation possible).");
+        en.put("suspend.cta", "Suspend eSIM");
+        en.put("suspend.title", "Suspend eSIM");
+        en.put("suspend.header", "Suspend this eSIM?");
+        en.put("suspend.warning", "The SIM will be suspended temporarily. You can reactivate it later.");
+        en.put("suspend.confirm", "I understand and want to suspend.");
+        en.put("suspend.cta.confirm", "Suspend");
+        en.put("suspend.loading.title", "Suspension");
+        en.put("suspend.loading", "Suspension in progress...");
+        en.put("suspend.success", "Suspension accepted.");
+        en.put("suspend.failed", "Suspension failed.");
+        en.put("terminate.hint", "Terminate this eSIM for this account (irreversible).");
+        en.put("terminate.cta", "Terminate eSIM");
+        en.put("terminate.title", "eSIM termination");
+        en.put("terminate.header", "Terminate this eSIM?");
+        en.put("terminate.warning", "This will terminate the subscriber. The SIM will lose network access.");
+        en.put("terminate.confirm", "I understand and want to terminate.");
+        en.put("terminate.sim.label", "SIM:");
+        en.put("terminate.sim.missing", "SIM unknown.");
+        en.put("terminate.cta.confirm", "Terminate");
+        en.put("terminate.loading.title", "Termination");
+        en.put("terminate.loading", "Termination in progress...");
+        en.put("terminate.success", "Termination accepted.");
+        en.put("terminate.failed", "Termination failed.");
+        en.put("balance.cta", "Internet balance");
+        en.put("balance.header", "Internet balance");
+        en.put("balance.title", "Internet balance");
+        en.put("balance.subtitle", "Check your credit and renew your plan.");
+        en.put("balance.card.title", "Your internet balance");
+        en.put("balance.status.active", "Active");
+        en.put("balance.loading", "Loading...");
+        en.put("balance.meta.unit", "Unit:");
+        en.put("balance.meta.expiration", "Expires:");
+        en.put("balance.unavailable", "Balance unavailable");
+        en.put("balance.info", "When your balance reaches 0, you can renew your plan from this page.");
+        en.put("balance.renew", "Renew plan");
+        en.put("errors.msisdn.required", "No eSIM linked to this account. Subscribe to get one.");
+        en.put("errors.subscriber.terminated", "eSIM terminated: you can no longer subscribe.");
+        en.put("errors.renew.amount", "Last plan amount unknown. Subscribe to a plan first.");
+        en.put("renew.confirm.title", "Renewal");
+        en.put("renew.confirm.header", "Confirm renewal?");
+        en.put("renew.confirm.body", "You are about to renew your last plan.");
+        en.put("renew.loading.title", "Renewal");
+        en.put("renew.loading.header", "Renewal in progress...");
+        en.put("renew.success", "Renewal OK");
 
 
         Map<String, String> de = new HashMap<>();
@@ -1477,6 +2933,10 @@ public class App extends Application {
         de.put("cta.viewPlans", "Tarife anzeigen");
         de.put("nav.back", "Zurück");
         de.put("nav.menu", "MENU");
+        de.put("nav.home", "Start");
+        de.put("nav.plans", "Tarife");
+        de.put("nav.balance", "Guthaben");
+        de.put("nav.esims", "Meine eSIMs");
         de.put("plans.title", "Angebote für");
         de.put("plans.subtitle", "Verfügbare Tarife für");
         de.put("plans.none", "Keine eSIM-Tarife für dieses Land gefunden.");
@@ -1497,10 +2957,21 @@ public class App extends Application {
         de.put("subscribe.confirm.title", "eSIM-Buchung");
         de.put("subscribe.confirm.header", "Buchung bestätigen?");
         de.put("subscribe.confirm.body", "Du bist dabei, einen eSIM-Tarif für dieses Land zu aktivieren.");
+        de.put("subscribe.confirm.body.newsim", "Es ist noch keine eSIM mit diesem Konto verbunden. Nach der Buchung wird eine neue eSIM zugewiesen.");
         de.put("subscribe.loading.title", "Buchung");
         de.put("subscribe.loading.header", "Buchung läuft...");
         de.put("subscribe.success.unparsed", "Buchung OK (Antwort nicht interpretierbar).");
         de.put("subscribe.success", "Buchung OK");
+        de.put("reactivate.title", "eSIM reaktivieren");
+        de.put("reactivate.header", "Deine eSIM ist gesperrt");
+        de.put("reactivate.body", "Möchtest du die eSIM reaktivieren, um die Buchung fortzusetzen?");
+        de.put("reactivate.action", "Reaktivieren");
+        de.put("reactivate.cta", "eSIM reaktivieren");
+        de.put("reactivate.cancel", "Abbrechen");
+        de.put("reactivate.loading.title", "Reaktivierung");
+        de.put("reactivate.loading.header", "Reaktivierung läuft...");
+        de.put("reactivate.success", "eSIM reaktiviert. Du kannst die Buchung erneut starten.");
+        de.put("reactivate.missingSim", "Keine eSIM mit diesem Konto verbunden. Bitte wähle einen Tarif, um eine zu erhalten.");
         de.put("activation.title", "eSIM-Aktivierung");
         de.put("activation.inProgress", "Aktivierung läuft...");
         de.put("activation.fetchingQr", "Aktivierung abgeschlossen. QR wird geladen...");
@@ -1509,17 +2980,23 @@ public class App extends Application {
         de.put("activation.retry", "Aktivierung läuft noch. Bitte später erneut versuchen.");
         de.put("activation.success", "Aktivierung OK");
         de.put("success.title", "Deine eSIM ist bereit");
+        de.put("success.header", "Abo erfolgreich");
+        de.put("success.subtitle.long", "Dein Tarif ist aktiv. Scanne den QR-Code, um die eSIM zu installieren.");
+        de.put("success.plan.unknown", "eSIM-Tarif");
         de.put("success.subtitle", "Scanne den QR-Code, um die eSIM zu installieren.");
         de.put("success.copy", "LPA-Code kopieren");
         de.put("success.download", "QR herunterladen");
         de.put("success.download.done", "QR heruntergeladen.");
         de.put("errors.qr.download", "QR-Download fehlgeschlagen.");
         de.put("success.next", "Aktiviere anschließend mobile Daten auf deinem iPhone/Android.");
+        de.put("success.myEsim", "Meine eSIMs");
+        de.put("success.home", "Zurück zur Startseite");
         de.put("clipboard.copied", "Der LPA-Code wurde kopiert.");
         de.put("greeting.default", "Hallo");
         de.put("wallet.prefix", "Guthaben");
         de.put("wallet.placeholder", "Guthaben: --");
-        de.put("wallet.unavailable", "Guthaben nicht verfugbar");        de.put("home.balance.label", "Verfugbares Guthaben");
+        de.put("wallet.unavailable", "Guthaben nicht verfugbar");
+        de.put("home.balance.label", "Verfugbares Guthaben");
         de.put("home.balance.add", "+ Geld einzahlen");
         de.put("home.action.receive", "Empfangen");
         de.put("home.action.pay", "Bezahlen");
@@ -1533,7 +3010,74 @@ public class App extends Application {
         de.put("esim.intro.title", "Willkommen im Orange eSIM Bereich");
         de.put("esim.intro.subtitle", "Klicken Sie auf die folgende Option:");
         de.put("esim.intro.card", "Orange eSIM aktivieren  >");
+        de.put("esim.intro.myEsim", "Meine eSIMs");
         de.put("esim.intro.info", "Dienst nur auf eSIM-fahigen Telefonen verfugbar. Zahlungsgebuhren von X € fallen an.");
+        de.put("active.header", "Meine eSIMs");
+        de.put("active.title", "Aktive Tarife");
+        de.put("active.subtitle", "Prufe deine aktiven Tarife und erneuere sie.");
+        de.put("active.loading", "Aktive Tarife werden geladen...");
+        de.put("active.empty", "Noch kein aktiver Tarif.");
+        de.put("active.found", "Aktive Tarife:");
+        de.put("active.price.loading", "Preis wird geladen...");
+        de.put("active.price.unavailable", "Preis nicht verfugbar");
+        de.put("active.balance.label", "Restguthaben:");
+        de.put("active.balance.unavailable", "Guthaben nicht verfugbar");
+        de.put("active.renew", "Erneuern");
+        de.put("active.status.unknown", "Status unbekannt");
+        de.put("active.status.label", "Status:");
+        de.put("active.status.suspended", "Deine eSIM ist suspendiert. Reaktiviere sie, um fortzufahren.");
+        de.put("active.status.terminated", "eSIM beendet. Du kannst nicht erneut abonnieren.");
+        de.put("active.expiration", "Ablauf:");
+        de.put("active.msisdn", "Meine SIM:");
+        de.put("active.unknown", "eSIM-Tarif");
+        de.put("noEsim.title", "Du hast noch keine eSIM");
+        de.put("noEsim.body", "Wahle einen Tarif, um deine eSIM zu erstellen und zu aktivieren.");
+        de.put("noEsim.cta", "Tarife anzeigen");
+        de.put("suspend.hint", "eSIM vorubergehend sperren (Reaktivierung moglich).");
+        de.put("suspend.cta", "eSIM sperren");
+        de.put("suspend.title", "eSIM sperren");
+        de.put("suspend.header", "Diese eSIM sperren?");
+        de.put("suspend.warning", "Die SIM wird vorubergehend gesperrt. Du kannst sie spater reaktivieren.");
+        de.put("suspend.confirm", "Ich verstehe und mochte sperren.");
+        de.put("suspend.cta.confirm", "Sperren");
+        de.put("suspend.loading.title", "Sperrung");
+        de.put("suspend.loading", "Sperrung laeuft...");
+        de.put("suspend.success", "Sperrung akzeptiert.");
+        de.put("suspend.failed", "Sperrung fehlgeschlagen.");
+        de.put("terminate.hint", "eSIM fur dieses Konto beenden (endgultig).");
+        de.put("terminate.cta", "eSIM beenden");
+        de.put("terminate.title", "eSIM-Kundigung");
+        de.put("terminate.header", "Diese eSIM beenden?");
+        de.put("terminate.warning", "Diese Aktion beendet den Abonnenten. Die SIM hat keinen Netzzugang mehr.");
+        de.put("terminate.confirm", "Ich verstehe und mochte beenden.");
+        de.put("terminate.sim.label", "SIM:");
+        de.put("terminate.sim.missing", "SIM unbekannt.");
+        de.put("terminate.cta.confirm", "Beenden");
+        de.put("terminate.loading.title", "Kundigung");
+        de.put("terminate.loading", "Kundigung laeuft...");
+        de.put("terminate.success", "Kundigung akzeptiert.");
+        de.put("terminate.failed", "Kundigung fehlgeschlagen.");
+        de.put("balance.cta", "Internetguthaben");
+        de.put("balance.header", "Internetguthaben");
+        de.put("balance.title", "Internetguthaben");
+        de.put("balance.subtitle", "Guthaben prüfen und Tarif erneuern.");
+        de.put("balance.card.title", "Dein Internetguthaben");
+        de.put("balance.status.active", "Aktiv");
+        de.put("balance.loading", "Laden...");
+        de.put("balance.meta.unit", "Einheit:");
+        de.put("balance.meta.expiration", "Ablauf:");
+        de.put("balance.unavailable", "Guthaben nicht verfugbar");
+        de.put("balance.info", "Wenn dein Guthaben 0 erreicht, kannst du den Tarif hier erneuern.");
+        de.put("balance.renew", "Tarif erneuern");
+        de.put("errors.msisdn.required", "Keine eSIM mit diesem Konto verbunden. Bitte einen Tarif buchen.");
+        de.put("errors.subscriber.terminated", "eSIM beendet: Keine neue Buchung moglich.");
+        de.put("errors.renew.amount", "Letzter Betrag unbekannt. Zuerst einen Tarif buchen.");
+        de.put("renew.confirm.title", "Verlangerung");
+        de.put("renew.confirm.header", "Verlangerung bestatigen?");
+        de.put("renew.confirm.body", "Du erneuerst deinen letzten Tarif.");
+        de.put("renew.loading.title", "Verlangerung");
+        de.put("renew.loading.header", "Verlangerung laeuft...");
+        de.put("renew.success", "Verlangerung OK");
 
 
         Map<String, String> es = new HashMap<>();
@@ -1556,6 +3100,10 @@ public class App extends Application {
         es.put("cta.viewPlans", "Ver planes");
         es.put("nav.back", "Volver");
         es.put("nav.menu", "MENU");
+        es.put("nav.home", "Inicio");
+        es.put("nav.plans", "Planes");
+        es.put("nav.balance", "Saldo");
+        es.put("nav.esims", "Mis eSIM");
         es.put("plans.title", "Planes para");
         es.put("plans.subtitle", "Planes disponibles para");
         es.put("plans.none", "No se encontraron planes eSIM para este país.");
@@ -1576,10 +3124,21 @@ public class App extends Application {
         es.put("subscribe.confirm.title", "Suscripción eSIM");
         es.put("subscribe.confirm.header", "¿Confirmar suscripción?");
         es.put("subscribe.confirm.body", "Vas a activar un plan eSIM para este país.");
+        es.put("subscribe.confirm.body.newsim", "Aún no hay una eSIM asociada a esta cuenta. Se asignará una nueva eSIM tras la suscripción.");
         es.put("subscribe.loading.title", "Suscripción");
         es.put("subscribe.loading.header", "Suscripción en curso...");
         es.put("subscribe.success.unparsed", "Suscripción OK (respuesta no interpretable).");
         es.put("subscribe.success", "Suscripción OK");
+        es.put("reactivate.title", "Reactivar eSIM");
+        es.put("reactivate.header", "Tu eSIM está suspendida");
+        es.put("reactivate.body", "¿Quieres reactivar tu eSIM para continuar la suscripción?");
+        es.put("reactivate.action", "Reactivar");
+        es.put("reactivate.cta", "Reactivar eSIM");
+        es.put("reactivate.cancel", "Cancelar");
+        es.put("reactivate.loading.title", "Reactivación");
+        es.put("reactivate.loading.header", "Reactivación en curso...");
+        es.put("reactivate.success", "eSIM reactivada. Puedes reintentar la suscripción.");
+        es.put("reactivate.missingSim", "No hay una eSIM asociada a esta cuenta. Elige un plan para obtener una.");
         es.put("activation.title", "Activación eSIM");
         es.put("activation.inProgress", "Activación en curso...");
         es.put("activation.fetchingQr", "Activación terminada. Cargando QR...");
@@ -1588,17 +3147,23 @@ public class App extends Application {
         es.put("activation.retry", "Activación aún en curso. Inténtalo de nuevo más tarde.");
         es.put("activation.success", "Activación OK");
         es.put("success.title", "Tu eSIM está lista");
+        es.put("success.header", "Suscripción exitosa");
+        es.put("success.subtitle.long", "Tu plan está activo. Escanea el QR para instalar la eSIM.");
+        es.put("success.plan.unknown", "Plan eSIM");
         es.put("success.subtitle", "Escanea el código QR para instalar la eSIM.");
         es.put("success.copy", "Copiar código LPA");
         es.put("success.download", "Descargar QR");
         es.put("success.download.done", "QR descargado.");
         es.put("errors.qr.download", "Fallo al descargar el QR.");
         es.put("success.next", "Luego activa los datos móviles en tu iPhone/Android.");
+        es.put("success.myEsim", "Ver mis eSIM");
+        es.put("success.home", "Volver al inicio");
         es.put("clipboard.copied", "El código LPA se ha copiado.");
         es.put("greeting.default", "Hola");
         es.put("wallet.prefix", "Saldo");
         es.put("wallet.placeholder", "Saldo: --");
-        es.put("wallet.unavailable", "Saldo no disponible");        es.put("home.balance.label", "Saldo disponible");
+        es.put("wallet.unavailable", "Saldo no disponible");
+        es.put("home.balance.label", "Saldo disponible");
         es.put("home.balance.add", "+ Agregar dinero");
         es.put("home.action.receive", "Recibir");
         es.put("home.action.pay", "Pagar");
@@ -1612,7 +3177,74 @@ public class App extends Application {
         es.put("esim.intro.title", "Bienvenido a la seccion eSIM Orange");
         es.put("esim.intro.subtitle", "Haz clic en la opcion siguiente:");
         es.put("esim.intro.card", "Activar tu eSIM Orange  >");
+        es.put("esim.intro.myEsim", "Ver mis eSIM");
         es.put("esim.intro.info", "Servicio solo disponible en telefonos compatibles con eSIM. Se aplicaran tarifas de X €.");
+        es.put("active.header", "Mis eSIM");
+        es.put("active.title", "Planes activos");
+        es.put("active.subtitle", "Consulta tus planes activos y renuévalos.");
+        es.put("active.loading", "Cargando planes activos...");
+        es.put("active.empty", "No hay planes activos por ahora.");
+        es.put("active.found", "Planes activos:");
+        es.put("active.price.loading", "Cargando precio...");
+        es.put("active.price.unavailable", "Precio no disponible");
+        es.put("active.balance.label", "Saldo restante:");
+        es.put("active.balance.unavailable", "Saldo no disponible");
+        es.put("active.renew", "Renovar");
+        es.put("active.status.unknown", "Estado desconocido");
+        es.put("active.status.label", "Estado:");
+        es.put("active.status.suspended", "Tu eSIM está suspendida. Reactívala para continuar.");
+        es.put("active.status.terminated", "eSIM finalizada. Ya no puedes suscribirte.");
+        es.put("active.expiration", "Expira:");
+        es.put("active.msisdn", "Mi SIM:");
+        es.put("active.unknown", "Plan eSIM");
+        es.put("noEsim.title", "Aun no tienes una eSIM");
+        es.put("noEsim.body", "Elige un plan para crear y activar tu eSIM.");
+        es.put("noEsim.cta", "Ver planes");
+        es.put("suspend.hint", "Suspender temporalmente la eSIM (reactivación posible).");
+        es.put("suspend.cta", "Suspender eSIM");
+        es.put("suspend.title", "Suspender eSIM");
+        es.put("suspend.header", "¿Suspender esta eSIM?");
+        es.put("suspend.warning", "La SIM se suspenderá temporalmente. Podrás reactivarla más tarde.");
+        es.put("suspend.confirm", "Entiendo y quiero suspender.");
+        es.put("suspend.cta.confirm", "Suspender");
+        es.put("suspend.loading.title", "Suspensión");
+        es.put("suspend.loading", "Suspensión en curso...");
+        es.put("suspend.success", "Suspensión aceptada.");
+        es.put("suspend.failed", "Suspensión fallida.");
+        es.put("terminate.hint", "Dar de baja esta eSIM para esta cuenta (irreversible).");
+        es.put("terminate.cta", "Dar de baja eSIM");
+        es.put("terminate.title", "Baja eSIM");
+        es.put("terminate.header", "¿Dar de baja esta eSIM?");
+        es.put("terminate.warning", "Esta accion da de baja al abonado. La SIM no tendra acceso a la red.");
+        es.put("terminate.confirm", "Entiendo y quiero darla de baja.");
+        es.put("terminate.sim.label", "SIM:");
+        es.put("terminate.sim.missing", "SIM desconocida.");
+        es.put("terminate.cta.confirm", "Dar de baja");
+        es.put("terminate.loading.title", "Baja");
+        es.put("terminate.loading", "Baja en curso...");
+        es.put("terminate.success", "Baja aceptada.");
+        es.put("terminate.failed", "No se pudo dar de baja.");
+        es.put("balance.cta", "Saldo de Internet");
+        es.put("balance.header", "Saldo de Internet");
+        es.put("balance.title", "Saldo de Internet");
+        es.put("balance.subtitle", "Consulta tu crédito y renueva tu plan.");
+        es.put("balance.card.title", "Tu saldo de Internet");
+        es.put("balance.status.active", "Activo");
+        es.put("balance.loading", "Cargando...");
+        es.put("balance.meta.unit", "Unidad:");
+        es.put("balance.meta.expiration", "Expira:");
+        es.put("balance.unavailable", "Saldo no disponible");
+        es.put("balance.info", "Cuando tu saldo llegue a 0, puedes renovar el plan desde esta pagina.");
+        es.put("balance.renew", "Renovar plan");
+        es.put("errors.msisdn.required", "No hay eSIM asociada a esta cuenta. Suscribete para obtener una.");
+        es.put("errors.subscriber.terminated", "eSIM finalizada: ya no puedes suscribirte.");
+        es.put("errors.renew.amount", "Importe del ultimo plan desconocido. Suscribete primero.");
+        es.put("renew.confirm.title", "Renovacion");
+        es.put("renew.confirm.header", "¿Confirmar renovacion?");
+        es.put("renew.confirm.body", "Vas a renovar tu ultimo plan.");
+        es.put("renew.loading.title", "Renovacion");
+        es.put("renew.loading.header", "Renovacion en curso...");
+        es.put("renew.success", "Renovacion OK");
 
 
         Map<String, String> zh = new HashMap<>();
@@ -1624,7 +3256,7 @@ public class App extends Application {
         zh.put("continent.antarctic", "南极洲");
         zh.put("continent.other", "其他");
         zh.put("continent.title", "大洲");
-                zh.put("continent.subtitle", "请选择位于");
+        zh.put("continent.subtitle", "请选择位于");
         zh.put("app.title", "Akuunda Pay - eSIM");
         zh.put("destinations.title", "目的地");
         zh.put("destinations.subtitle", "选择一个国家查看 eSIM 套餐。");
@@ -1635,6 +3267,10 @@ public class App extends Application {
         zh.put("cta.viewPlans", "查看套餐");
         zh.put("nav.back", "返回");
         zh.put("nav.menu", "菜单");
+        zh.put("nav.home", "首页");
+        zh.put("nav.plans", "套餐");
+        zh.put("nav.balance", "余额");
+        zh.put("nav.esims", "我的 eSIM");
         zh.put("plans.title", "套餐适用于");
         zh.put("plans.subtitle", "可用套餐：");
         zh.put("plans.none", "该国家暂无 eSIM 套餐。");
@@ -1655,10 +3291,21 @@ public class App extends Application {
         zh.put("subscribe.confirm.title", "eSIM 订阅");
         zh.put("subscribe.confirm.header", "确认订阅？");
         zh.put("subscribe.confirm.body", "您将激活该国家的 eSIM 套餐。");
+        zh.put("subscribe.confirm.body.newsim", "该账户尚未关联 eSIM，订阅后将分配新的 eSIM。");
         zh.put("subscribe.loading.title", "订阅");
         zh.put("subscribe.loading.header", "订阅处理中...");
         zh.put("subscribe.success.unparsed", "订阅成功（响应无法解析）。");
         zh.put("subscribe.success", "订阅成功");
+        zh.put("reactivate.title", "重新激活 eSIM");
+        zh.put("reactivate.header", "你的 eSIM 已暂停");
+        zh.put("reactivate.body", "是否重新激活 eSIM 以继续订阅？");
+        zh.put("reactivate.action", "重新激活");
+        zh.put("reactivate.cta", "重新激活 eSIM");
+        zh.put("reactivate.cancel", "取消");
+        zh.put("reactivate.loading.title", "重新激活");
+        zh.put("reactivate.loading.header", "正在重新激活...");
+        zh.put("reactivate.success", "eSIM 已重新激活，可重新订阅。");
+        zh.put("reactivate.missingSim", "该账户没有关联 eSIM，请先选择套餐以获取。");
         zh.put("activation.title", "eSIM 激活");
         zh.put("activation.inProgress", "激活中...");
         zh.put("activation.fetchingQr", "激活完成。正在获取 QR...");
@@ -1667,23 +3314,23 @@ public class App extends Application {
         zh.put("activation.retry", "激活仍在进行中。请稍后重试。");
         zh.put("activation.success", "激活成功");
         zh.put("success.title", "您的 eSIM 已准备就绪");
+        zh.put("success.header", "订阅成功");
+        zh.put("success.subtitle.long", "您的套餐已激活。扫描 QR 码安装 eSIM。");
+        zh.put("success.plan.unknown", "eSIM 套餐");
         zh.put("success.subtitle", "扫描 QR 码以安装 eSIM。");
         zh.put("success.copy", "复制 LPA 代码");
         zh.put("success.download", "下载二维码");
         zh.put("success.download.done", "二维码已下载。");
         zh.put("errors.qr.download", "二维码下载失败。");
         zh.put("success.next", "然后在 iPhone/Android 上开启移动数据。");
+        zh.put("success.myEsim", "查看我的 eSIM");
+        zh.put("success.home", "返回首页");
         zh.put("clipboard.copied", "LPA 代码已复制。");
         zh.put("greeting.default", "你好");
         zh.put("wallet.prefix", "余额");
         zh.put("wallet.placeholder", "余额: --");
         zh.put("wallet.unavailable", "余额不可用");
-
-        dict.put("fr", fr);
-        dict.put("en", en);
-        dict.put("de", de);
-        dict.put("es", es);
-                zh.put("home.balance.label", "可用余额");
+        zh.put("home.balance.label", "可用余额");
         zh.put("home.balance.add", "+ 充值");
         zh.put("home.action.receive", "收款");
         zh.put("home.action.pay", "支付");
@@ -1697,7 +3344,79 @@ public class App extends Application {
         zh.put("esim.intro.title", "欢迎使用 Orange eSIM");
         zh.put("esim.intro.subtitle", "请点击以下选项：");
         zh.put("esim.intro.card", "激活 Orange eSIM  >");
+        zh.put("esim.intro.myEsim", "查看我的 eSIM");
         zh.put("esim.intro.info", "仅适用于支持 eSIM 的手机。将收取 X € 费用。");
+        zh.put("active.header", "我的 eSIM");
+        zh.put("active.title", "活跃套餐");
+        zh.put("active.subtitle", "查看活跃套餐并续订。");
+        zh.put("active.loading", "正在加载活跃套餐...");
+        zh.put("active.empty", "暂无活跃套餐。");
+        zh.put("active.found", "活跃套餐：");
+        zh.put("active.price.loading", "正在加载价格...");
+        zh.put("active.price.unavailable", "价格不可用");
+        zh.put("active.balance.label", "剩余余额：");
+        zh.put("active.balance.unavailable", "余额不可用");
+        zh.put("active.renew", "续订");
+        zh.put("active.status.unknown", "状态未知");
+        zh.put("active.status.label", "状态：");
+        zh.put("active.status.suspended", "你的 eSIM 已暂停。请先重新激活。");
+        zh.put("active.status.terminated", "eSIM 已注销，无法再次订阅。");
+        zh.put("active.expiration", "到期：");
+        zh.put("active.msisdn", "我的SIM:");
+        zh.put("active.unknown", "eSIM 套餐");
+        zh.put("noEsim.title", "你还没有 eSIM");
+        zh.put("noEsim.body", "请选择套餐以创建并激活 eSIM。");
+        zh.put("noEsim.cta", "查看套餐");
+        zh.put("suspend.hint", "暂时停用 eSIM（可重新激活）。");
+        zh.put("suspend.cta", "暂停 eSIM");
+        zh.put("suspend.title", "暂停 eSIM");
+        zh.put("suspend.header", "确定暂停该 eSIM？");
+        zh.put("suspend.warning", "SIM 将暂时停用，稍后可重新激活。");
+        zh.put("suspend.confirm", "我已了解并确认暂停。");
+        zh.put("suspend.cta.confirm", "确认暂停");
+        zh.put("suspend.loading.title", "暂停中");
+        zh.put("suspend.loading", "正在暂停...");
+        zh.put("suspend.success", "暂停已受理。");
+        zh.put("suspend.failed", "暂停失败。");
+        zh.put("terminate.hint", "注销该 eSIM（不可撤销）。");
+        zh.put("terminate.cta", "注销 eSIM");
+        zh.put("terminate.title", "注销 eSIM");
+        zh.put("terminate.header", "确定注销该 eSIM？");
+        zh.put("terminate.warning", "注销后该 SIM 将无法接入网络。");
+        zh.put("terminate.confirm", "我已了解并确认注销。");
+        zh.put("terminate.sim.label", "SIM：");
+        zh.put("terminate.sim.missing", "未知 SIM。");
+        zh.put("terminate.cta.confirm", "确认注销");
+        zh.put("terminate.loading.title", "注销中");
+        zh.put("terminate.loading", "正在注销...");
+        zh.put("terminate.success", "注销已受理。");
+        zh.put("terminate.failed", "注销失败。");
+        zh.put("balance.cta", "网络余额");
+        zh.put("balance.header", "网络余额");
+        zh.put("balance.title", "网络余额");
+        zh.put("balance.subtitle", "查看余额并续订套餐。");
+        zh.put("balance.card.title", "您的网络余额");
+        zh.put("balance.status.active", "启用");
+        zh.put("balance.loading", "加载中...");
+        zh.put("balance.meta.unit", "单位:");
+        zh.put("balance.meta.expiration", "到期:");
+        zh.put("balance.unavailable", "余额不可用");
+        zh.put("balance.info", "当余额为 0 时，可在此页面续订套餐。");
+        zh.put("balance.renew", "续订套餐");
+        zh.put("errors.msisdn.required", "该账户暂无 eSIM，请先订购套餐。");
+        zh.put("errors.subscriber.terminated", "eSIM 已注销：无法再次订阅。");
+        zh.put("errors.renew.amount", "上次套餐金额未知，请先订购套餐。");
+        zh.put("renew.confirm.title", "续订");
+        zh.put("renew.confirm.header", "确认续订？");
+        zh.put("renew.confirm.body", "您将续订上一次的套餐。");
+        zh.put("renew.loading.title", "续订");
+        zh.put("renew.loading.header", "续订进行中...");
+        zh.put("renew.success", "续订成功");
+
+        dict.put("fr", fr);
+        dict.put("en", en);
+        dict.put("de", de);
+        dict.put("es", es);
         dict.put("zh", zh);
         return dict;
     }
