@@ -31,9 +31,11 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -102,6 +104,11 @@ public class App extends Application {
     private String cachedSimSerial = null;
     private String cachedSimStatus = null;
     private final Map<String, Map<String, String>> i18n = buildI18n();
+    private List<JSONObject> catalogProducts = new ArrayList<>();
+    private final List<String> popularIso3 = List.of(
+            "FRA", "JPN", "ESP", "DEU", "ITA", "MAR", "CIV", "SEN",
+            "BEN", "USA", "GBR", "NLD", "CHN", "BRA"
+    );
     private final Map<String, String> langLabels = Map.of(
             "fr", "Francais",
             "en", "English",
@@ -246,79 +253,126 @@ public class App extends Application {
         HBox bottomNav = buildBottomNav("plans");
         mainContainer.getChildren().addAll(backBtn, title, subtitle, loader, scrollPane, bottomNav);
 
-        new Thread(() -> {
-            try {
-                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-                // Appel du catalogue côté backend (token requis)
-                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                        .uri(URI.create(BACKEND_URL))
-                        .header("Accept", "application/json")
-                        .GET();
-                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
-                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+        loadCatalogProducts(products -> {
+            mainContainer.getChildren().remove(loader);
+            int foundCount = 0;
+            for (JSONObject p : products) {
+                if (classifyProduct(p) != CoverageType.LOCAL) {
+                    continue;
                 }
-                HttpRequest request = requestBuilder.build();
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                
-                Platform.runLater(() -> {
-                    try {
-                        mainContainer.getChildren().remove(loader);
-                        System.err.println("[IHM] Catalogue status=" + response.statusCode());
-                        if (response.body() != null) {
-                            System.err.println("[IHM] Catalogue body length=" + response.body().length());
-                        }
-
-                        if (response.statusCode() == 200 && response.body() != null && !response.body().isEmpty()) {
-                            // Réponse Transatel = objet { products: [...] }
-                            JSONObject catalog = new JSONObject(response.body());
-                            JSONArray products = catalog.optJSONArray("products");
-                            int foundCount = 0;
-
-                            if (products == null) {
-                                plansListContainer.getChildren().add(new Label(t("errors.catalog.invalid")));
-                                return;
-                            }
-
-                            for (int i = 0; i < products.length(); i++) {
-                                JSONObject p = products.getJSONObject(i);
-                                JSONObject def = p.optJSONObject("productDefinition");
-
-                                if (def != null) {
-                                    JSONArray countryList = def.optJSONArray("countryList");
-                                    // Filtre par pays (code ISO3 présent dans countryList)
-                                    if (isCountryMatching(iso3, countryList)) {
-                                        plansListContainer.getChildren().add(createPlanCard(p));
-                                        foundCount++;
-                                    }
-                                }
-                            }
-
-                            if (foundCount == 0) {
-                                plansListContainer.getChildren().add(new Label(t("plans.none")));
-                            }
-                        } else {
-                            String body = response.body() == null ? "" : response.body().strip();
-                            if (body.length() > 200) {
-                                body = body.substring(0, 200) + "...";
-                            }
-                            if (response.statusCode() == 401) {
-                                plansListContainer.getChildren().add(new Label(t("errors.token")));
-                            } else {
-                                plansListContainer.getChildren().add(new Label(t("errors.catalog") + " " + response.statusCode()));
-                            }
-                            if (!body.isEmpty()) {
-                                plansListContainer.getChildren().add(new Label(body));
-                            }
-                        }
-                    } catch (Exception ex) {
-                        ex.printStackTrace();
-                        plansListContainer.getChildren().add(new Label(t("errors.ui") + " " + ex.getMessage()));
-                    }
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> plansListContainer.getChildren().add(new Label(formatNetworkError(e))));
+                JSONArray countryList = getProductCountryList(p);
+                if (isCountryMatching(iso3, countryList)) {
+                    plansListContainer.getChildren().add(createPlanCard(p));
+                    foundCount++;
+                }
             }
-        }).start();
+            if (foundCount == 0) {
+                plansListContainer.getChildren().add(new Label(t("plans.none")));
+            }
+        }, error -> {
+            mainContainer.getChildren().remove(loader);
+            plansListContainer.getChildren().add(new Label(error));
+        });
+    }
+
+    private void showRegionPlansPage(String region) {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = true;
+        String localizedRegion = localizeRegion(region);
+
+        Button backBtn = new Button("<- " + t("nav.back"));
+        backBtn.getStyleClass().addAll("link-button", "back-button");
+        backBtn.setOnAction(e -> buildMainSelectionScreen());
+
+        Label title = new Label(t("plans.title") + " " + localizedRegion);
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("plans.subtitle") + " " + localizedRegion + ".");
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        VBox plansListContainer = new VBox(15);
+        plansListContainer.setPadding(new Insets(10, 5, 10, 5));
+
+        ScrollPane scrollPane = new ScrollPane(plansListContainer);
+        scrollPane.setFitToWidth(true);
+        scrollPane.getStyleClass().add("transparent-scroll");
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+
+        ProgressIndicator loader = new ProgressIndicator();
+        loader.getStyleClass().add("loader");
+        HBox bottomNav = buildBottomNav("plans");
+        mainContainer.getChildren().addAll(backBtn, title, subtitle, loader, scrollPane, bottomNav);
+
+        loadCatalogProducts(products -> {
+            mainContainer.getChildren().remove(loader);
+            int foundCount = 0;
+            for (JSONObject p : products) {
+                if (classifyProduct(p) != CoverageType.REGIONAL) {
+                    continue;
+                }
+                String productRegion = getProductRegion(p);
+                if (productRegion != null && productRegion.equalsIgnoreCase(region)) {
+                    plansListContainer.getChildren().add(createPlanCard(p));
+                    foundCount++;
+                }
+            }
+            if (foundCount == 0) {
+                plansListContainer.getChildren().add(new Label(t("plans.none")));
+            }
+        }, error -> {
+            mainContainer.getChildren().remove(loader);
+            plansListContainer.getChildren().add(new Label(error));
+        });
+    }
+
+    private void showWorldPlansPage(String search) {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = true;
+
+        Button backBtn = new Button("<- " + t("nav.back"));
+        backBtn.getStyleClass().addAll("link-button", "back-button");
+        backBtn.setOnAction(e -> buildMainSelectionScreen());
+
+        Label title = new Label(t("plans.title") + " " + t("scope.world"));
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("plans.subtitle") + " " + t("scope.world") + ".");
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        VBox plansListContainer = new VBox(15);
+        plansListContainer.setPadding(new Insets(10, 5, 10, 5));
+
+        ScrollPane scrollPane = new ScrollPane(plansListContainer);
+        scrollPane.setFitToWidth(true);
+        scrollPane.getStyleClass().add("transparent-scroll");
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+
+        ProgressIndicator loader = new ProgressIndicator();
+        loader.getStyleClass().add("loader");
+        HBox bottomNav = buildBottomNav("plans");
+        mainContainer.getChildren().addAll(backBtn, title, subtitle, loader, scrollPane, bottomNav);
+
+        loadCatalogProducts(products -> {
+            mainContainer.getChildren().remove(loader);
+            int foundCount = 0;
+            String needle = search == null ? "" : search.trim().toLowerCase();
+            for (JSONObject p : products) {
+                if (classifyProduct(p) != CoverageType.WORLD) {
+                    continue;
+                }
+                if (!needle.isEmpty() && !getProductNameForMatch(p).contains(needle)) {
+                    continue;
+                }
+                plansListContainer.getChildren().add(createPlanCard(p));
+                foundCount++;
+            }
+            if (foundCount == 0) {
+                plansListContainer.getChildren().add(new Label(t("plans.none")));
+            }
+        }, error -> {
+            mainContainer.getChildren().remove(loader);
+            plansListContainer.getChildren().add(new Label(error));
+        });
     }
 
     // --- ÉCRAN 3 : SOLDE INTERNET + RENOUVELLEMENT ---
@@ -838,7 +892,7 @@ public class App extends Application {
         header.getStyleClass().add("header");
 
         ImageView logo = new ImageView(new Image(getClass().getResourceAsStream("/images/logo.jpg")));
-        logo.setFitWidth(34);
+        logo.setFitWidth(48);
         logo.setPreserveRatio(true);
         logo.getStyleClass().add("logo");
 
@@ -1012,8 +1066,7 @@ public class App extends Application {
         regional.setUserData("REGIONAL");
         world.setUserData("WORLD");
 
-        world.setSelected(true);
-
+        local.setSelected(true);
         scopeGroup.selectedToggleProperty().addListener((obs, oldVal, newVal) -> applyFiltersAndRender());
 
         HBox tabs = new HBox(8, local, regional, world);
@@ -1029,30 +1082,34 @@ public class App extends Application {
             return;
         }
         String search = searchField == null ? "" : searchField.getText().trim().toLowerCase();
-        String scope = "WORLD";
+        String scope = null;
         if (scopeGroup != null && scopeGroup.getSelectedToggle() != null) {
             scope = scopeGroup.getSelectedToggle().getUserData().toString();
+        }
+
+        if ("WORLD".equals(scope)) {
+            showWorldPlansPage(search);
+            return;
+        }
+
+        if ("REGIONAL".equals(scope)) {
+            updateListView(new ArrayList<>(allCountriesData), scope);
+            return;
+        }
+
+        if (scope == null) {
+            destinationList.getChildren().clear();
+            return;
+        }
+
+        if ("LOCAL".equals(scope)) {
+            renderPopularDestinations(search);
+            return;
         }
 
         List<JSONObject> filtered = new ArrayList<>();
         for (JSONObject country : allCountriesData) {
             String name = getCountryDisplayName(country);
-            String iso2 = country.optString("cca2", "");
-            String region = country.optString("region", "");
-
-            if ("LOCAL".equals(scope)) {
-                if (userCountryIso2 != null && !userCountryIso2.isBlank()) {
-                    if (!userCountryIso2.equalsIgnoreCase(iso2)) {
-                        continue;
-                    }
-                }
-            } else if ("REGIONAL".equals(scope)) {
-                if (userRegion != null && !userRegion.isBlank()) {
-                    if (!userRegion.equalsIgnoreCase(region)) {
-                        continue;
-                    }
-                }
-            }
 
             if (!search.isEmpty() && !name.toLowerCase().contains(search)) {
                 continue;
@@ -1075,6 +1132,404 @@ public class App extends Application {
                 return;
             }
         }
+    }
+
+    private void renderPopularDestinations(String search) {
+        destinationList.getChildren().clear();
+
+        Label title = new Label(t("popular.title"));
+        title.getStyleClass().add("popular-title");
+        title.setMaxWidth(Double.MAX_VALUE);
+        title.setAlignment(Pos.CENTER);
+        destinationList.getChildren().add(title);
+
+        GridPane grid = new GridPane();
+        grid.setHgap(12);
+        grid.setVgap(12);
+        ColumnConstraints c1 = new ColumnConstraints();
+        c1.setPercentWidth(50);
+        c1.setHgrow(Priority.ALWAYS);
+        ColumnConstraints c2 = new ColumnConstraints();
+        c2.setPercentWidth(50);
+        c2.setHgrow(Priority.ALWAYS);
+        grid.getColumnConstraints().setAll(c1, c2);
+
+        int idx = 0;
+        for (String iso3 : popularIso3) {
+            JSONObject country = findCountryByIso3(iso3);
+            if (country == null) {
+                continue;
+            }
+            String name = getCountryDisplayName(country).toLowerCase();
+            if (search != null && !search.isBlank() && !name.contains(search)) {
+                continue;
+            }
+            HBox card = createCountryCard(country);
+            card.setMaxWidth(Double.MAX_VALUE);
+            GridPane.setHgrow(card, Priority.ALWAYS);
+            grid.add(card, idx % 2, idx / 2);
+            idx++;
+        }
+
+        if (idx == 0) {
+            destinationList.getChildren().add(new Label(t("popular.none")));
+            return;
+        }
+
+        destinationList.getChildren().add(grid);
+
+        Button more = new Button(t("popular.more"));
+        more.getStyleClass().add("secondary-button");
+        more.setMaxWidth(Double.MAX_VALUE);
+        more.setOnAction(e -> showAllCountriesPage());
+        destinationList.getChildren().add(more);
+    }
+
+    private void showAllCountriesPage() {
+        mainContainer.getChildren().clear();
+        mainContainer.getStyleClass().setAll("screen-light");
+        isPlansPage = false;
+
+        Button backBtn = new Button("<- " + t("nav.back"));
+        backBtn.getStyleClass().addAll("link-button", "back-button");
+        backBtn.setOnAction(e -> buildMainSelectionScreen());
+
+        Label title = new Label(t("destinations.title"));
+        title.getStyleClass().add("page-title-dark");
+        Label subtitle = new Label(t("destinations.subtitle"));
+        subtitle.getStyleClass().add("page-subtitle-dark");
+
+        TextField allSearch = new TextField();
+        allSearch.setPromptText(t("search.prompt"));
+        allSearch.getStyleClass().add("search-field");
+
+        VBox listContainer = new VBox(12);
+        listContainer.setPadding(new Insets(10, 5, 10, 5));
+
+        renderAllCountriesList(listContainer, "");
+        allSearch.textProperty().addListener((obs, oldVal, newVal) ->
+                renderAllCountriesList(listContainer, newVal));
+
+        ScrollPane scrollPane = new ScrollPane(listContainer);
+        scrollPane.setFitToWidth(true);
+        scrollPane.getStyleClass().add("transparent-scroll");
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+
+        mainContainer.getChildren().addAll(backBtn, title, subtitle, allSearch, scrollPane);
+        if (primaryStage != null) {
+            primaryStage.setTitle(t("destinations.title"));
+        }
+    }
+
+    private void renderAllCountriesList(VBox listContainer, String search) {
+        listContainer.getChildren().clear();
+        if (allCountriesData == null || allCountriesData.isEmpty()) {
+            return;
+        }
+        String needle = search == null ? "" : search.trim().toLowerCase();
+        List<JSONObject> all = new ArrayList<>(allCountriesData);
+        all.sort(Comparator.comparing(c -> getCountryDisplayName(c).toLowerCase()));
+        for (JSONObject c : all) {
+            String name = getCountryDisplayName(c).toLowerCase();
+            if (!needle.isEmpty() && !name.contains(needle)) {
+                continue;
+            }
+            listContainer.getChildren().add(createCountryCard(c));
+        }
+    }
+
+    private enum CoverageType {
+        LOCAL,
+        REGIONAL,
+        WORLD,
+        UNKNOWN
+    }
+
+    private void renderWorldPlansInList(String search) {}
+
+    private void loadCatalogProducts(Consumer<List<JSONObject>> onSuccess, Consumer<String> onError) {
+        new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BACKEND_URL))
+                        .header("Accept", "application/json")
+                        .GET();
+                if (BACKEND_TOKEN != null && !BACKEND_TOKEN.isBlank()) {
+                    requestBuilder.header("Authorization", "Bearer " + BACKEND_TOKEN.trim());
+                }
+                HttpRequest request = requestBuilder.build();
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(() -> {
+                    try {
+                        if (response.statusCode() == 200 && response.body() != null && !response.body().isEmpty()) {
+                            JSONObject catalog = new JSONObject(response.body());
+                            JSONArray products = catalog.optJSONArray("products");
+                            if (products == null) {
+                                onError.accept(t("errors.catalog.invalid"));
+                                return;
+                            }
+                            List<JSONObject> list = new ArrayList<>();
+                            for (int i = 0; i < products.length(); i++) {
+                                list.add(products.getJSONObject(i));
+                            }
+                            catalogProducts = list;
+                            onSuccess.accept(list);
+                            return;
+                        }
+
+                        String body = response.body() == null ? "" : response.body().strip();
+                        if (body.length() > 200) {
+                            body = body.substring(0, 200) + "...";
+                        }
+                        if (response.statusCode() == 401) {
+                            onError.accept(t("errors.token"));
+                        } else {
+                            String msg = t("errors.catalog") + " " + response.statusCode();
+                            if (!body.isEmpty()) {
+                                msg += "\n" + body;
+                            }
+                            onError.accept(msg);
+                        }
+                    } catch (Exception ex) {
+                        onError.accept(t("errors.ui") + " " + ex.getMessage());
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> onError.accept(formatNetworkError(e)));
+            }
+        }).start();
+    }
+
+    private JSONArray getProductCountryList(JSONObject product) {
+        if (product == null) {
+            return null;
+        }
+        JSONObject def = product.optJSONObject("productDefinition");
+        return def == null ? null : def.optJSONArray("countryList");
+    }
+
+    private CoverageType classifyProduct(JSONObject product) {
+        if (isWorldByName(product)) {
+            return CoverageType.WORLD;
+        }
+        if (isRegionalByName(product)) {
+            return CoverageType.REGIONAL;
+        }
+
+        JSONArray countryList = getProductCountryList(product);
+        if (countryList == null || countryList.length() == 0) {
+            return CoverageType.UNKNOWN;
+        }
+        if (countryList.length() == 1) {
+            return CoverageType.LOCAL;
+        }
+
+        List<String> regions = new ArrayList<>();
+        for (int i = 0; i < countryList.length(); i++) {
+            String iso3 = countryList.optString(i, "");
+            if (iso3 == null || iso3.isBlank()) {
+                continue;
+            }
+            String region = getRegionForIso3(iso3);
+            regions.add(region == null || region.isBlank() ? "Other" : region);
+        }
+
+        if (isWorldByCoverage(product, regions, countryList.length())) {
+            return CoverageType.WORLD;
+        }
+
+        String region = regions.isEmpty() ? null : regions.get(0);
+        boolean sameRegion = true;
+        for (String r : regions) {
+            if (region == null || !region.equalsIgnoreCase(r)) {
+                sameRegion = false;
+                break;
+            }
+        }
+        return sameRegion ? CoverageType.REGIONAL : CoverageType.UNKNOWN;
+    }
+
+    private boolean isWorldByName(JSONObject product) {
+        String name = getProductNameForMatch(product).toUpperCase(Locale.ROOT);
+        String productId = getProductIdForMatch(product).toUpperCase(Locale.ROOT);
+        return name.contains("WORLD")
+                || name.contains("GLOBAL")
+                || productId.contains("WORLD")
+                || productId.contains("GLOBAL");
+    }
+
+    private boolean isWorldByCoverage(JSONObject product, List<String> regions, int countryCount) {
+        if (isWorldByName(product)) {
+            return true;
+        }
+        if (countryCount >= 120) {
+            return true;
+        }
+        HashSet<String> major = new HashSet<>();
+        for (String r : regions) {
+            if ("Africa".equalsIgnoreCase(r)
+                    || "Americas".equalsIgnoreCase(r)
+                    || "Asia".equalsIgnoreCase(r)
+                    || "Europe".equalsIgnoreCase(r)
+                    || "Oceania".equalsIgnoreCase(r)) {
+                major.add(r.toLowerCase(Locale.ROOT));
+            }
+        }
+        return major.size() >= 5;
+    }
+
+    private String getProductRegion(JSONObject product) {
+        String regionByName = getRegionFromName(product);
+        if (regionByName != null) {
+            return regionByName;
+        }
+
+        JSONArray countryList = getProductCountryList(product);
+        if (countryList == null || countryList.length() == 0) {
+            return null;
+        }
+        String region = null;
+        for (int i = 0; i < countryList.length(); i++) {
+            String iso3 = countryList.optString(i, "");
+            if (iso3 == null || iso3.isBlank()) {
+                continue;
+            }
+            String current = getRegionForIso3(iso3);
+            if (current == null || current.isBlank()) {
+                current = "Other";
+            }
+            if (region == null) {
+                region = current;
+            } else if (!region.equalsIgnoreCase(current)) {
+                return null;
+            }
+        }
+        return region;
+    }
+
+    private String getRegionForIso3(String iso3) {
+        if (iso3 == null || iso3.isBlank() || allCountriesData == null) {
+            return null;
+        }
+        for (JSONObject country : allCountriesData) {
+            String code = country.optString("cca3", "");
+            if (iso3.equalsIgnoreCase(code)) {
+                return country.optString("region", null);
+            }
+        }
+        return null;
+    }
+
+    private String getProductNameForMatch(JSONObject product) {
+        if (product == null) {
+            return "";
+        }
+        String name = "";
+        JSONObject display = product.optJSONObject("display");
+        if (display != null) {
+            name = display.optString("name", "");
+        }
+        if (name == null || name.isBlank()) {
+            JSONObject def = product.optJSONObject("productDefinition");
+            if (def != null) {
+                name = def.optString("productId", "");
+            }
+        }
+        return name == null ? "" : name.toLowerCase(Locale.ROOT);
+    }
+
+    private ImageView buildContinentIcon(String region) {
+        String path = switch (region) {
+            case "Africa" -> "/images/continents/551221-carte-detaillee-du-continent-africain-en-silhouette-noire-gratuit-vectoriel.jpg";
+            case "Americas" -> "/images/continents/60039370-silhouette-continent-américain-isolé-vecteur-illustration.jpg";
+            case "Asia" -> "/images/continents/asie.png";
+            case "Europe" -> "/images/continents/22176832-l-europe-continent-carte-noir-carte-de-l-europe-vectoriel.jpg";
+            case "Oceania" -> "/images/continents/oceanie.jpg";
+            case "Antarctic" -> "/images/continents/antartique.jpg";
+            default -> null;
+        };
+        if (path == null) {
+            return null;
+        }
+        try {
+            Image raw = new Image(getClass().getResourceAsStream(path));
+            Image orange = tintSilhouette(raw, Color.web("#F88809"));
+            ImageView view = new ImageView(orange != null ? orange : raw);
+            view.getStyleClass().add("continent-icon-image");
+            view.setFitWidth(28);
+            view.setFitHeight(28);
+            view.setPreserveRatio(true);
+            return view;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Image tintSilhouette(Image source, Color tint) {
+        if (source == null || source.isError()) {
+            return source;
+        }
+        int width = (int) source.getWidth();
+        int height = (int) source.getHeight();
+        if (width <= 0 || height <= 0) {
+            return source;
+        }
+        PixelReader reader = source.getPixelReader();
+        if (reader == null) {
+            return source;
+        }
+        WritableImage out = new WritableImage(width, height);
+        PixelWriter writer = out.getPixelWriter();
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Color c = reader.getColor(x, y);
+                double alpha = c.getOpacity();
+                double brightness = (c.getRed() + c.getGreen() + c.getBlue()) / 3.0;
+                if (alpha < 0.05 || brightness > 0.9) {
+                    writer.setColor(x, y, Color.TRANSPARENT);
+                } else {
+                    writer.setColor(x, y, new Color(tint.getRed(), tint.getGreen(), tint.getBlue(), 1.0));
+                }
+            }
+        }
+        return out;
+    }
+
+    private String getProductIdForMatch(JSONObject product) {
+        if (product == null) {
+            return "";
+        }
+        JSONObject def = product.optJSONObject("productDefinition");
+        String id = def != null ? def.optString("productId", "") : "";
+        return id == null ? "" : id.toLowerCase(Locale.ROOT);
+    }
+
+    private String getRegionFromName(JSONObject product) {
+        String name = getProductNameForMatch(product).toUpperCase(Locale.ROOT);
+        String productId = getProductIdForMatch(product).toUpperCase(Locale.ROOT);
+        String text = name + " " + productId;
+        if (text.contains("AFRICA")) {
+            return "Africa";
+        }
+        if (text.contains("EUROPE")) {
+            return "Europe";
+        }
+        if (text.contains("ASIA")) {
+            return "Asia";
+        }
+        if (text.contains("AMERICA") || text.contains("AMERICAS")) {
+            return "Americas";
+        }
+        if (text.contains("OCEANIA")) {
+            return "Oceania";
+        }
+        return null;
+    }
+
+    private boolean isRegionalByName(JSONObject product) {
+        return getRegionFromName(product) != null;
     }
 
     private void fetchInternetBalance(Label balanceValue, Label balanceMeta, Label balanceExpiry, Button renewBtn, VBox balanceCard, VBox noEsimCard, VBox infoBlock) {
@@ -1694,7 +2149,7 @@ public class App extends Application {
             return;
         }
 
-        if ("WORLD".equals(scope)) {
+        if ("REGIONAL".equals(scope)) {
             List<String> order = List.of("Africa", "Americas", "Asia", "Europe", "Oceania", "Antarctic", "Other");
             Map<String, List<JSONObject>> grouped = new HashMap<>();
             for (JSONObject country : countries) {
@@ -1727,8 +2182,7 @@ public class App extends Application {
         card.setPadding(new Insets(12));
         card.getStyleClass().addAll("country-card", "continent-card");
 
-        Region icon = new Region();
-        icon.getStyleClass().add("continent-icon");
+        ImageView icon = buildContinentIcon(region);
         Label name = new Label(localizeRegion(region));
         name.getStyleClass().add("continent-name");
         Region spacer = new Region();
@@ -1738,42 +2192,14 @@ public class App extends Application {
         Label arrow = new Label("> ");
         arrow.getStyleClass().add("continent-arrow");
 
-        card.getChildren().addAll(icon, name, spacer, count, arrow);
-        card.setOnMouseClicked(e -> openContinentWindow(region, countries));
+        if (icon != null) {
+            card.getChildren().add(icon);
+        }
+        card.getChildren().addAll(name, spacer, count, arrow);
+        card.setOnMouseClicked(e -> showRegionPlansPage(region));
         return card;
     }
 
-    private void openContinentWindow(String region, List<JSONObject> countries) {
-        String localizedRegion = localizeRegion(region);
-        mainContainer.getChildren().clear();
-        mainContainer.getStyleClass().setAll("screen-light");
-        isPlansPage = false;
-
-        Button backBtn = new Button("<- " + t("nav.back"));
-        backBtn.getStyleClass().addAll("link-button", "back-button");
-        backBtn.setOnAction(e -> buildMainSelectionScreen());
-
-        Label title = new Label(t("continent.title") + " " + localizedRegion);
-        title.getStyleClass().add("page-title-dark");
-        Label subtitle = new Label(t("continent.subtitle") + " " + localizedRegion + ".");
-        subtitle.getStyleClass().add("page-subtitle-dark");
-
-        VBox listContainer = new VBox(12);
-        listContainer.setPadding(new Insets(10, 5, 10, 5));
-        for (JSONObject c : countries) {
-            listContainer.getChildren().add(createCountryCard(c, false, null));
-        }
-
-        ScrollPane scrollPane = new ScrollPane(listContainer);
-        scrollPane.setFitToWidth(true);
-        scrollPane.getStyleClass().add("transparent-scroll");
-        VBox.setVgrow(scrollPane, Priority.ALWAYS);
-
-        mainContainer.getChildren().addAll(backBtn, title, subtitle, scrollPane);
-        if (primaryStage != null) {
-            primaryStage.setTitle(t("continent.title") + " " + localizedRegion);
-        }
-    }
 
     private HBox createCountryCard(JSONObject country) {
         return createCountryCard(country, true, null);
@@ -2628,6 +3054,9 @@ public class App extends Application {
         fr.put("plans.title", "Offres pour");
         fr.put("plans.subtitle", "Forfaits disponibles pour");
         fr.put("plans.none", "Aucun forfait eSIM trouvé pour ce pays.");
+        fr.put("popular.title", "Destinations populaires");
+        fr.put("popular.none", "Aucune destination populaire trouvée.");
+        fr.put("popular.more", "Plus de destinations");
         fr.put("errors.catalog.invalid", "Catalogue invalide.");
         fr.put("errors.token", "401 - Token manquant ou invalide.");
         fr.put("errors.catalog", "Erreur catalogue:");
@@ -2696,9 +3125,9 @@ public class App extends Application {
         fr.put("home.service.send", "Envoyer");
         fr.put("home.service.exchange", "Change devise");
         fr.put("esim.intro.header", "eSIM");
-        fr.put("esim.intro.title", "Bienvenue dans la rubrique eSIM Orange");
+        fr.put("esim.intro.title", "Bienvenue dans la rubrique eSIM");
         fr.put("esim.intro.subtitle", "En cliquant sur l'option ci-dessous :");
-        fr.put("esim.intro.card", "Activer votre eSIM Orange  >");
+        fr.put("esim.intro.card", "Activer votre eSIM  >");
         fr.put("esim.intro.myEsim", "Voir mes eSIM");
         fr.put("esim.intro.info", "Service uniquement disponible sur les téléphones compatibles eSim. Des frais de paiement de X € seront appliqués.");
         fr.put("active.header", "Mes eSIM");
@@ -2797,6 +3226,9 @@ public class App extends Application {
         en.put("plans.title", "Plans for");
         en.put("plans.subtitle", "Available plans for");
         en.put("plans.none", "No eSIM plans found for this country.");
+        en.put("popular.title", "Popular destinations");
+        en.put("popular.none", "No popular destinations found.");
+        en.put("popular.more", "More destinations");
         en.put("errors.catalog.invalid", "Invalid catalog.");
         en.put("errors.token", "401 - Missing or invalid token.");
         en.put("errors.catalog", "Catalog error:");
@@ -2865,9 +3297,9 @@ public class App extends Application {
         en.put("home.service.send", "Send");
         en.put("home.service.exchange", "Exchange");
         en.put("esim.intro.header", "eSIM");
-        en.put("esim.intro.title", "Welcome to the Orange eSIM section");
+        en.put("esim.intro.title", "Welcome to the eSIM section");
         en.put("esim.intro.subtitle", "Click the option below:");
-        en.put("esim.intro.card", "Activate your Orange eSIM  >");
+        en.put("esim.intro.card", "Activate your eSIM  >");
         en.put("esim.intro.myEsim", "My eSIMs");
         en.put("esim.intro.info", "Service only available on eSIM compatible phones. Payment fees of X € will apply.");
         en.put("active.header", "My eSIMs");
@@ -2966,6 +3398,9 @@ public class App extends Application {
         de.put("plans.title", "Angebote für");
         de.put("plans.subtitle", "Verfügbare Tarife für");
         de.put("plans.none", "Keine eSIM-Tarife für dieses Land gefunden.");
+        de.put("popular.title", "Beliebte Reiseziele");
+        de.put("popular.none", "Keine beliebten Reiseziele gefunden.");
+        de.put("popular.more", "Mehr Reiseziele");
         de.put("errors.catalog.invalid", "Ungültiger Katalog.");
         de.put("errors.token", "401 - Token fehlt oder ist ungültig.");
         de.put("errors.catalog", "Katalogfehler:");
@@ -3034,9 +3469,9 @@ public class App extends Application {
         de.put("home.service.send", "Senden");
         de.put("home.service.exchange", "Wechsel");
         de.put("esim.intro.header", "eSIM");
-        de.put("esim.intro.title", "Willkommen im Orange eSIM Bereich");
+        de.put("esim.intro.title", "Willkommen im eSIM Bereich");
         de.put("esim.intro.subtitle", "Klicken Sie auf die folgende Option:");
-        de.put("esim.intro.card", "Orange eSIM aktivieren  >");
+        de.put("esim.intro.card", "eSIM aktivieren  >");
         de.put("esim.intro.myEsim", "Meine eSIMs");
         de.put("esim.intro.info", "Dienst nur auf eSIM-fahigen Telefonen verfugbar. Zahlungsgebuhren von X € fallen an.");
         de.put("active.header", "Meine eSIMs");
@@ -3135,6 +3570,9 @@ public class App extends Application {
         es.put("plans.title", "Planes para");
         es.put("plans.subtitle", "Planes disponibles para");
         es.put("plans.none", "No se encontraron planes eSIM para este país.");
+        es.put("popular.title", "Destinos populares");
+        es.put("popular.none", "No se encontraron destinos populares.");
+        es.put("popular.more", "Más destinos");
         es.put("errors.catalog.invalid", "Catálogo inválido.");
         es.put("errors.token", "401 - Token faltante o inválido.");
         es.put("errors.catalog", "Error de catálogo:");
@@ -3203,9 +3641,9 @@ public class App extends Application {
         es.put("home.service.send", "Enviar");
         es.put("home.service.exchange", "Cambio");
         es.put("esim.intro.header", "eSIM");
-        es.put("esim.intro.title", "Bienvenido a la seccion eSIM Orange");
+        es.put("esim.intro.title", "Bienvenido a la seccion eSIM");
         es.put("esim.intro.subtitle", "Haz clic en la opcion siguiente:");
-        es.put("esim.intro.card", "Activar tu eSIM Orange  >");
+        es.put("esim.intro.card", "Activar tu eSIM  >");
         es.put("esim.intro.myEsim", "Ver mis eSIM");
         es.put("esim.intro.info", "Servicio solo disponible en telefonos compatibles con eSIM. Se aplicaran tarifas de X €.");
         es.put("active.header", "Mis eSIM");
@@ -3304,6 +3742,9 @@ public class App extends Application {
         zh.put("plans.title", "套餐适用于");
         zh.put("plans.subtitle", "可用套餐：");
         zh.put("plans.none", "该国家暂无 eSIM 套餐。");
+        zh.put("popular.title", "热门目的地");
+        zh.put("popular.none", "未找到热门目的地。");
+        zh.put("popular.more", "更多目的地");
         zh.put("errors.catalog.invalid", "套餐目录无效。");
         zh.put("errors.token", "401 - 缺少或无效 token。");
         zh.put("errors.catalog", "套餐目录错误：");
@@ -3372,9 +3813,9 @@ public class App extends Application {
         zh.put("home.service.send", "转账");
         zh.put("home.service.exchange", "换汇");
         zh.put("esim.intro.header", "eSIM");
-        zh.put("esim.intro.title", "欢迎使用 Orange eSIM");
+        zh.put("esim.intro.title", "欢迎使用 eSIM");
         zh.put("esim.intro.subtitle", "请点击以下选项：");
-        zh.put("esim.intro.card", "激活 Orange eSIM  >");
+        zh.put("esim.intro.card", "激活 eSIM  >");
         zh.put("esim.intro.myEsim", "查看我的 eSIM");
         zh.put("esim.intro.info", "仅适用于支持 eSIM 的手机。将收取 X € 费用。");
         zh.put("active.header", "我的 eSIM");
