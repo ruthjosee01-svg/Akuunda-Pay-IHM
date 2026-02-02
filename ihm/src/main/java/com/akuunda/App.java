@@ -2230,6 +2230,10 @@ public class App extends Application {
                         showAlert(t("alert.error"), t("errors.renew.insufficientFunds"));
                     } else if (response.statusCode() == 401) {
                         showAlert(t("alert.error"), t("errors.token"));
+                    } else if (response.statusCode() == 409) {
+                        showAlert(t("alert.error"), t("errors.conflict"));
+                    } else if (response.statusCode() == 401) {
+                        showAlert(t("alert.error"), t("errors.token"));
                     } else {
                         String body = response.body() == null ? "" : response.body();
                         showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
@@ -3083,6 +3087,10 @@ public class App extends Application {
                         if (onSuccess != null) {
                             onSuccess.run();
                         }
+                    } else if (response.statusCode() == 409) {
+                        showAlert(t("alert.error"), t("errors.conflict"));
+                    } else if (response.statusCode() == 401) {
+                        showAlert(t("alert.error"), t("errors.token"));
                     } else {
                         String body = response.body() == null ? "" : response.body();
                         showAlert(t("alert.error"), "HTTP " + response.statusCode() + "\n" + body);
@@ -3649,7 +3657,7 @@ public class App extends Application {
         fr.put("errors.catalog", "Erreur catalogue:");
         fr.put("errors.ui", "Erreur UI:");
         fr.put("errors.network", "Erreur réseau :");
-        fr.put("errors.conflict", "Une souscription est déjà en cours pour cette SIM. Réessayez dans quelques minutes.");
+        fr.put("errors.conflict", "Une opération est déjà en cours sur votre eSIM. Veuillez patienter 1 à 2 minutes puis réessayer.");
         fr.put("plan.select", "Sélectionner");
         fr.put("plan.free", "Gratuit");
         fr.put("plan.priceUnavailable", "Prix indisponible");
@@ -3877,7 +3885,7 @@ public class App extends Application {
         en.put("errors.msisdn.missing", "MSISDN is required to subscribe.");
         en.put("errors.noEsim", "No eSIM associated with this account.");
         en.put("errors.subscribe.insufficientFunds", "Subscription failed: insufficient balance.");
-        en.put("errors.conflict", "A subscription is already pending for this SIM. Please try again in a few minutes.");
+        en.put("errors.conflict", "An operation is already in progress on your eSIM. Please wait 1 to 2 minutes, then try again.");
         en.put("subscribe.confirm.title", "eSIM subscription");
         en.put("subscribe.confirm.header", "Confirm subscription?");
         en.put("subscribe.confirm.body", "You are about to activate an eSIM plan for this country.");
@@ -4090,7 +4098,7 @@ public class App extends Application {
         de.put("errors.msisdn.missing", "MSISDN ist für die Buchung erforderlich.");
         de.put("errors.noEsim", "Keine eSIM mit diesem Konto verknüpft.");
         de.put("errors.subscribe.insufficientFunds", "Buchung fehlgeschlagen: Guthaben zu niedrig.");
-        de.put("errors.conflict", "Eine Anfrage ist bereits für diese SIM ausstehend. Bitte in ein paar Minuten erneut versuchen.");
+        de.put("errors.conflict", "Ein Vorgang läuft bereits für Ihre eSIM. Bitte 1 bis 2 Minuten warten und erneut versuchen.");
         de.put("subscribe.confirm.title", "eSIM-Buchung");
         de.put("subscribe.confirm.header", "Buchung bestätigen?");
         de.put("subscribe.confirm.body", "Du bist dabei, einen eSIM-Tarif für dieses Land zu aktivieren.");
@@ -4303,7 +4311,7 @@ public class App extends Application {
         es.put("errors.msisdn.missing", "MSISDN es necesario para suscribirse.");
         es.put("errors.noEsim", "No hay una eSIM asociada a esta cuenta.");
         es.put("errors.subscribe.insufficientFunds", "Suscripción fallida: saldo insuficiente.");
-        es.put("errors.conflict", "Ya hay una suscripción pendiente para esta SIM. Inténtalo de nuevo en unos minutos.");
+        es.put("errors.conflict", "Ya hay una operación en curso en tu eSIM. Espera de 1 a 2 minutos y vuelve a intentarlo.");
         es.put("subscribe.confirm.title", "Suscripción eSIM");
         es.put("subscribe.confirm.header", "¿Confirmar suscripción?");
         es.put("subscribe.confirm.body", "Vas a activar un plan eSIM para este país.");
@@ -4516,7 +4524,7 @@ public class App extends Application {
         zh.put("errors.msisdn.missing", "订阅需要 MSISDN。");
         zh.put("errors.noEsim", "该账户没有关联 eSIM。");
         zh.put("errors.subscribe.insufficientFunds", "订阅失败：余额不足。");
-        zh.put("errors.conflict", "该 SIM 已有待处理的订阅，请稍后再试。");
+        zh.put("errors.conflict", "您的 eSIM 正在处理另一项操作。请等待 1 到 2 分钟后重试。");
         zh.put("subscribe.confirm.title", "eSIM 订阅");
         zh.put("subscribe.confirm.header", "确认订阅？");
         zh.put("subscribe.confirm.body", "您将激活该国家的 eSIM 套餐。");
